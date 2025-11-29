@@ -49,4 +49,4 @@ jobs:
             dist/aws-tools_${{ matrix.os }}_${{ matrix.arch }}.tar.gz
             dist/aws-tools_${{ matrix.os }}_${{ matrix.arch }}.sha256
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.SECRET_TOKEN }}
