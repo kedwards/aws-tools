@@ -1,0 +1,52 @@
+---
+name: Release aws-tools
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+jobs:
+  build:
+    name: Build & Release
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        os: [linux]
+        arch: [amd64, arm64]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
+
+      - name: Prepare staging
+        run: |
+          mkdir -p dist/aws-tools
+          cp -R bin dist/aws-tools/
+          cp -R lib dist/aws-tools/
+          cp README.md dist/aws-tools/
+
+      - name: Create tarball
+        run: |
+          cd dist
+          tar -czf aws-tools_${{ matrix.os }}_${{ matrix.arch }}.tar.gz aws-tools
+
+      - name: Generate SHA256 checksum
+        run: |
+          cd dist
+          sha256sum aws-tools_${{ matrix.os }}_${{ matrix.arch }}.tar.gz \
+            > aws-tools_${{ matrix.os }}_${{ matrix.arch }}.sha256
+
+      - name: Upload Release Assets
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ env.VERSION }}
+          files: |
+            dist/aws-tools_${{ matrix.os }}_${{ matrix.arch }}.tar.gz
+            dist/aws-tools_${{ matrix.os }}_${{ matrix.arch }}.sha256
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
