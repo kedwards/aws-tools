@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+set -euo pipefail
+SCRIPT_DIR="$(cd -- "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/../lib/init.sh"
+
+filter="${1:-}"
+
+aws_get_all_running_instances "$filter"
+
+if [[ ${#INSTANCE_LIST[@]} -eq 0 ]]; then
+  echo "No running instances found"
+  exit 1
+fi
+
+printf '%-40s %s\n' "Name" "InstanceId"
+printf '%-40s %s\n' "----" "----------"
+for entry in "${INSTANCE_LIST[@]}"; do
+  name="${entry% *}"
+  id="${entry##* }"
+  printf '%-40s %s\n' "$name" "$id"
+done

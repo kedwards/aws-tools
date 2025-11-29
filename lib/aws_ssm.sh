@@ -1,0 +1,394 @@
+#!/usr/bin/env bash
+
+# --- Config helper for SSM forwarding (.ssmf.cfg style) ---
+
+aws_ssm_config_get() {
+  local file="$1" section="$2" key="$3"
+  awk -F ' *= *' -v s="[$section]" -v k="$key" '
+    $0 == s {found=1; next}
+    found && $1==k {print $2; exit}
+    found && /^\[.*\]/ {exit}
+  ' "$file"
+}
+
+aws_ssm_connect_usage() {
+  cat <<EOF
+Usage:
+  aws-ssm-connect [INSTANCE_NAME|INSTANCE_ID]
+  aws-ssm-connect --config
+
+Connect to an instance via AWS SSM. With --config, uses ~/.ssmf.cfg or \$SSMF_CONF:
+
+  [my-db-connection]
+  port = 5432
+  local_port = 5432
+  host = localhost
+  url = http://localhost:5432/
+  profile = my-profile
+  region = us-west-2
+  name = my-instance-tagname (optional)
+
+If 'name' is omitted, you will be prompted to choose a running instance.
+EOF
+}
+
+aws_ssm_connect_main() {
+  local use_config=false
+  local arg="${1:-}"
+
+  case "$arg" in
+  -h | --help)
+    aws_ssm_connect_usage
+    return 0
+    ;;
+  -c | --config)
+    use_config=true
+    shift || true
+    ;;
+  esac
+
+  if ! command -v aws >/dev/null 2>&1; then
+    log_error "AWS CLI not found"
+    return 1
+  fi
+
+  if $use_config; then
+    local CONFIG_FILE="${SSMF_CONF:-$HOME/.ssmf.cfg}"
+    if [[ ! -f "$CONFIG_FILE" ]]; then
+      log_error "Config file not found: $CONFIG_FILE"
+      echo "Create it with your [connection] sections."
+      return 1
+    fi
+
+    # Get connection names
+    mapfile -t connections < <(grep -oP '(?<=^\[).*?(?=\])' "$CONFIG_FILE")
+    if [[ ${#connections[@]} -eq 0 ]]; then
+      log_error "No [sections] found in $CONFIG_FILE"
+      return 1
+    fi
+
+    local connection
+    if ! menu_select_one "Select connection" connection "${connections[@]}"; then
+      return 1
+    fi
+
+    # Read config values
+    local profile region port local_port host url name
+    profile=$(aws_ssm_config_get "$CONFIG_FILE" "$connection" "profile")
+    region=$(aws_ssm_config_get "$CONFIG_FILE" "$connection" "region")
+    port=$(aws_ssm_config_get "$CONFIG_FILE" "$connection" "port")
+    local_port=$(aws_ssm_config_get "$CONFIG_FILE" "$connection" "local_port")
+    host=$(aws_ssm_config_get "$CONFIG_FILE" "$connection" "host")
+    url=$(aws_ssm_config_get "$CONFIG_FILE" "$connection" "url")
+    name=$(aws_ssm_config_get "$CONFIG_FILE" "$connection" "name")
+
+    if [[ -z "$profile" || -z "$region" || -z "$port" ]]; then
+      log_error "Invalid config for [$connection] - require profile, region, port"
+      return 1
+    fi
+
+    local_port="${local_port:-$port}"
+    host="${host:-localhost}"
+
+    # Switch profile if needed
+    if [[ "${AWS_PROFILE:-}" != "$profile" || "${AWS_REGION:-}" != "$region" ]]; then
+      log_info "Switching to profile $profile ($region)"
+      aws_profile_switch "$profile" -r "$region"
+    fi
+
+    # Resolve instance
+    local instance_id instance_name
+    if [[ -n "$name" ]]; then
+      instance_name="$name"
+      instance_id=$(aws_expand_instances "$name" | head -n1)
+      if [[ -z "$instance_id" ]]; then
+        log_error "No running instance found with name: $name"
+        return 1
+      fi
+    else
+      aws_get_all_running_instances ""
+      if [[ ${#INSTANCE_LIST[@]} -eq 0 ]]; then
+        log_error "No running instances found"
+        return 1
+      fi
+      local chosen
+      if ! menu_select_one "Select instance for port forwarding" chosen "${INSTANCE_LIST[@]}"; then
+        return 1
+      fi
+      instance_name="${chosen% *}"
+      instance_id="${chosen##* }"
+    fi
+
+    log_info "Starting SSM port forwarding: ${instance_name} (${instance_id}) -> ${host}:${port} (local:${local_port})"
+    aws ssm start-session \
+      --target "$instance_id" \
+      --document-name AWS-StartPortForwardingSessionToRemoteHost \
+      --parameters "{\"host\":[\"$host\"],\"portNumber\":[\"$port\"],\"localPortNumber\":[\"$local_port\"]}" &
+
+    local ssm_pid=$!
+    log_info "SSM port-forward session PID: $ssm_pid"
+
+    if [[ -n "$url" ]]; then
+      sleep 2
+      xdg-open "$url" 2>/dev/null || log_warn "Failed to open URL: $url"
+    fi
+    return 0
+  fi
+
+  # Non-config mode: interactive shell
+  local target="${1:-}"
+  local instance_id instance_name
+
+  if [[ -z "$target" ]]; then
+    aws_get_all_running_instances ""
+    if [[ ${#INSTANCE_LIST[@]} -eq 0 ]]; then
+      echo "No running instances found"
+      return 1
+    fi
+    local chosen
+    if ! menu_select_one "Select instance to connect to" chosen "${INSTANCE_LIST[@]}"; then
+      return 1
+    fi
+    instance_name="${chosen% *}"
+    instance_id="${chosen##* }"
+  elif [[ "$target" == i-* ]]; then
+    instance_id="$target"
+    instance_name="$target"
+  else
+    instance_id=$(aws_expand_instances "$target" | head -n1)
+    instance_name="$target"
+    if [[ -z "$instance_id" ]]; then
+      log_error "No running instance found with name: $target"
+      return 1
+    fi
+  fi
+
+  log_info "Starting SSM session to $instance_name ($instance_id)"
+  aws ssm start-session --target "$instance_id"
+}
+
+aws_ssm_execute_usage() {
+  cat <<EOF
+Usage:
+  aws-ssm-exec '<command>' [INSTANCE ...]
+  aws-ssm-exec '<command>'            # interactive instance selection
+EOF
+}
+
+aws_ssm_execute_main() {
+  if [[ "$#" -lt 1 ]]; then
+    aws_ssm_execute_usage
+    return 1
+  fi
+
+  local command="$1"
+  shift
+  local instance_ids=("$@")
+
+  if [[ ${#instance_ids[@]} -eq 0 ]]; then
+    aws_get_all_running_instances ""
+    if [[ ${#INSTANCE_LIST[@]} -eq 0 ]]; then
+      echo "No running instances found"
+      return 1
+    fi
+    local selections
+    if ! menu_select_multi "Select instances for SSM command" selections "${INSTANCE_LIST[@]}"; then
+      return 1
+    fi
+    # extract IDs
+    while IFS= read -r line; do
+      [[ -z "$line" ]] && continue
+      instance_ids+=("${line##* }")
+    done <<<"$selections"
+  fi
+
+  if [[ ${#instance_ids[@]} -eq 0 ]]; then
+    echo "No instances selected"
+    return 1
+  fi
+
+  local tmpfile
+  tmpfile=$(mktemp /tmp/ssm-script.XXXXXX)
+  trap 'rm -f "$tmpfile"' EXIT
+
+  cat >"$tmpfile" <<EOF
+{
+  "Parameters": {
+    "commands": [
+      "#!/bin/bash",
+      "$command"
+    ],
+    "executionTimeout": ["600"]
+  }
+}
+EOF
+
+  local cmd_id
+  cmd_id=$(aws ssm send-command \
+    --instance-ids "${instance_ids[@]}" \
+    --document-name "AWS-RunShellScript" \
+    --cli-input-json "file://$tmpfile" \
+    --query 'Command.CommandId' \
+    --output text)
+
+  echo "Command launched with id: $cmd_id"
+
+  local n_instances="${#instance_ids[@]}"
+
+  while true; do
+    local finished=0
+    for inst in "${instance_ids[@]}"; do
+      local status
+      status=$(aws ssm get-command-invocation \
+        --command-id "$cmd_id" \
+        --instance-id "$inst" \
+        --query Status \
+        --output text | tr 'A-Z' 'a-z')
+      local now
+      now=$(date +%Y-%m-%dT%H:%M:%S%z)
+      echo "$now $inst: $status"
+      case "$status" in
+      pending | inprogress | delayed) : ;;
+      *) finished=$((finished + 1)) ;;
+      esac
+    done
+    [[ $finished -ge $n_instances ]] && break
+    sleep 2
+  done
+
+  for inst in "${instance_ids[@]}"; do
+    local status out err
+    status=$(aws ssm get-command-invocation \
+      --command-id "$cmd_id" \
+      --instance-id "$inst" \
+      --query Status --output text)
+    out=$(aws ssm get-command-invocation \
+      --command-id "$cmd_id" \
+      --instance-id "$inst" \
+      --query StandardOutputContent --output text)
+    err=$(aws ssm get-command-invocation \
+      --command-id "$cmd_id" \
+      --instance-id "$inst" \
+      --query StandardErrorContent --output text)
+
+    echo "------------------------------------"
+    echo "RESULTS FROM $inst (STATUS $status):"
+    [[ -n "$out" ]] && {
+      echo "STDOUT:"
+      echo "$out"
+      echo "------------------------------------"
+    }
+    [[ -n "$err" ]] && {
+      echo "STDERR:"
+      echo "$err"
+      echo "------------------------------------"
+    }
+    [[ -z "$out" && -z "$err" ]] && echo "NO OUTPUT RETURNED"
+  done
+}
+
+aws_ssm_list_main() {
+  local current_profile="${AWS_PROFILE:-none}"
+  echo "Active SSM sessions (Current profile: $current_profile):"
+
+  ps aux | grep "session-manager-plugin" | grep -v grep | while read -r line; do
+    local pid target host port session_type instance_name
+    pid=$(awk '{print $2}' <<<"$line")
+    target=$(grep -oP '\-\-target \K[^ ]+' <<<"$line" || true)
+    [[ -z "$target" ]] && target=$(sed -n 's/.*TargetId":"\([^"]*\)".*/\1/p' <<<"$line" | head -n1)
+
+    if grep -q "StartPortForwardingSessionToRemoteHost" <<<"$line"; then
+      port=$(sed -n 's/.*localPortNumber":\["\([0-9]*\)".*/\1/p' <<<"$line" | head -n1)
+      host=$(sed -n 's/.*"host":\["\([^"]*\)".*/\1/p' <<<"$line" | head -n1)
+      [[ -z "$host" ]] && host="localhost"
+      session_type="Port: ${port:-?} -> ${host}"
+    elif grep -q "StartPortForwardingSession" <<<"$line"; then
+      port=$(sed -n 's/.*localPortNumber":\["\([0-9]*\)".*/\1/p' <<<"$line" | head -n1)
+      host=$(sed -n 's/.*DestinationHost":"\([^"]*\)".*/\1/p' <<<"$line" | head -n1)
+      [[ -z "$host" ]] && host="localhost"
+      session_type="Port: ${port:-?} -> ${host}"
+    else
+      session_type="Interactive Shell"
+    fi
+
+    instance_name=""
+    if [[ -n "$target" ]]; then
+      instance_name=$(aws ec2 describe-instances --instance-ids "$target" \
+        --query "Reservations[0].Instances[0].Tags[?Key=='Name'].Value" \
+        --output text 2>/dev/null || echo "")
+    fi
+
+    if [[ -n "$instance_name" && "$instance_name" != "None" ]]; then
+      echo "  PID: $pid | $session_type | Instance: $instance_name (${target:-unknown})"
+    else
+      echo "  PID: $pid | $session_type | Instance: ${target:-unknown}"
+    fi
+  done
+
+  echo ""
+  echo "Tip: Switch to the correct AWS profile to see instance names"
+}
+
+aws_ssm_kill_main() {
+  mapfile -t sessions < <(ps aux | grep "session-manager-plugin" | grep -v grep)
+  if [[ ${#sessions[@]} -eq 0 ]]; then
+    echo "No active SSM sessions found."
+    return 0
+  fi
+
+  local session_list=()
+  local pid_list=()
+  for line in "${sessions[@]}"; do
+    local pid target host port session_type instance_name
+    pid=$(awk '{print $2}' <<<"$line")
+    target=$(grep -oP '\-\-target \K[^ ]+' <<<"$line" || true)
+    [[ -z "$target" ]] && target=$(sed -n 's/.*TargetId":"\([^"]*\)".*/\1/p' <<<"$line" | head -n1)
+
+    if grep -q "StartPortForwardingSessionToRemoteHost" <<<"$line"; then
+      port=$(sed -n 's/.*localPortNumber":\["\([0-9]*\)".*/\1/p' <<<"$line" | head -n1)
+      host=$(sed -n 's/.*"host":\["\([^"]*\)".*/\1/p' <<<"$line" | head -n1)
+      [[ -z "$host" ]] && host="localhost"
+      session_type="Port: ${port:-?} -> ${host}"
+    elif grep -q "StartPortForwardingSession" <<<"$line"; then
+      port=$(sed -n 's/.*localPortNumber":\["\([0-9]*\)".*/\1/p' <<<"$line" | head -n1)
+      host=$(sed -n 's/.*DestinationHost":"\([^"]*\)".*/\1/p' <<<"$line" | head -n1)
+      [[ -z "$host" ]] && host="localhost"
+      session_type="Port: ${port:-?} -> ${host}"
+    else
+      session_type="Interactive Shell"
+    fi
+
+    instance_name=""
+    if [[ -n "$target" ]]; then
+      instance_name=$(aws ec2 describe-instances --instance-ids "$target" \
+        --query "Reservations[0].Instances[0].Tags[?Key=='Name'].Value" \
+        --output text 2>/dev/null || echo "")
+    fi
+
+    if [[ -n "$instance_name" && "$instance_name" != "None" ]]; then
+      session_list+=("PID: $pid | $session_type | Instance: $instance_name (${target:-unknown})")
+    else
+      session_list+=("PID: $pid | $session_type | Instance: ${target:-unknown}")
+    fi
+    pid_list+=("$pid")
+  done
+
+  local selected
+  if ! menu_select_multi "Select SSM sessions to kill" selected "${session_list[@]}"; then
+    return 0
+  fi
+
+  while IFS= read -r sel; do
+    [[ -z "$sel" ]] && continue
+    local pid
+    pid=$(grep -oP 'PID: \K[0-9]+' <<<"$sel" || true)
+    if [[ -n "$pid" ]]; then
+      echo "Killing SSM session PID: $pid"
+      if kill "$pid" 2>/dev/null; then
+        log_info "Session $pid terminated"
+      else
+        log_error "Failed to kill PID $pid"
+      fi
+    fi
+  done <<<"$selected"
+}
