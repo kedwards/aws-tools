@@ -1,6 +1,6 @@
-# 📦 AWS Tools – AWS Profile & SSM Toolkit
+# 📦 AWS SSM Toolkit
 
-**aws-tools** is a modular command-line toolkit for managing AWS CLI profiles, switching environments, connecting to EC2 via SSM, running commands across multiple AWS environments, and working efficiently with SSO.
+**aws-ssm-tools** is a modular command-line toolkit for managing connectis to EC2 via SSM, running commands across multiple AWS environments, and working efficiently with SSO.
 
 This toolkit designed with the following in mind:
 
@@ -14,12 +14,6 @@ This toolkit designed with the following in mind:
 ---
 
 # 🚀 Features
-
-### ✔ AWS Profile Management
-- Login with SSO via Granted/assume  
-- Switch profiles safely  
-- Unset or fully clear SSO sessions  
-- Inspect active identity (`aws-whoami`)
 
 ### ✔ SSM Session Management
 - Start shell sessions (`aws-ssm-connect`)  
@@ -51,12 +45,12 @@ Falls back to standard Bash menus if `fzf` is not installed.
 ### One-line curl install (recommended)
 
 ```
-curl -sSL https://raw.githubusercontent.com/kedwards/aws-tools/main/install.sh | bash
+curl -sSL https://raw.githubusercontent.com/kedwards/aws-ssm-tools/main/install.sh | bash
 ```
 
 This installs:
 
-- toolkit → `~/.local/aws-tools/`
+- toolkit → `~/.local/aws-ssm-tools/`
 - commands → `~/.local/bin/`
 
 Ensure your PATH includes:
@@ -70,13 +64,13 @@ export PATH="$HOME/.local/bin:$PATH"
 # 🔄 Updating
 
 ```
-aws-tools-update
+aws-ssm-tools-update
 ```
 
 or:
 
 ```
-curl -sSL https://raw.githubusercontent.com/kedwards/aws-tools/main/update.sh | bash
+curl -sSL https://raw.githubusercontent.com/kedwards/aws-ssm-tools/main/update.sh | bash
 ```
 
 ---
@@ -86,20 +80,16 @@ curl -sSL https://raw.githubusercontent.com/kedwards/aws-tools/main/update.sh | 
 ```
 aws-tools/
 ├── bin/
-│   ├── aws-profile
-│   ├── aws-whoami
 │   ├── aws-ssm-connect
 │   ├── aws-ssm-exec
 │   ├── aws-ssm-list
 │   ├── aws-ssm-kill
 │   ├── aws-env-run
-│   └── aws-instances
 │
 └── lib/
     ├── init.sh
     ├── logging.sh
     ├── menu.sh
-    ├── aws_profile.sh
     ├── aws_instances.sh
     ├── aws_ssm.sh
     └── aws_env_run.sh
@@ -134,20 +124,6 @@ aws-ssm-connect --config
 
 # 🧰 Usage Examples
 
-## 🔐 Switch AWS profiles
-
-```
-aws-profile dev
-aws-profile prod us-west-2
-aws-profile -u
-aws-profile -x
-```
-
-## 👤 Get current AWS identity
-
-```
-aws-whoami
-```
 
 ## 💻 Connect to EC2 via SSM
 
@@ -201,11 +177,13 @@ mise use -g granted
 
 or:
 
+
 ```
 brew install common-fate/granted/granted
 ```
 
 or:
+
 
 ```
 curl -s https://granted.dev/install | bash
