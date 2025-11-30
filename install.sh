@@ -21,7 +21,7 @@ curl -sSL "${REPO_URL}/archive/refs/heads/main.tar.gz" |
   tar xz -C "$tmpdir"
 
 # Extracted directory will be "aws-tools-main"
-EXTRACTED_DIR="${tmpdir}/aws-tools-main"
+EXTRACTED_DIR="${tmpdir}/aws-ssm-tools-main"
 
 # Sync files into installation directory
 echo "[INFO] Copying files..."
