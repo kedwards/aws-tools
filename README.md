@@ -48,6 +48,13 @@ Falls back to standard Bash menus if `fzf` is not installed.
 curl -sSL https://raw.githubusercontent.com/kedwards/aws-ssm-tools/main/install.sh | bash
 ```
 
+or:
+
+
+```
+wget -O - https://raw.githubusercontent.com/kedwards/aws-ssm-tools/main/install.sh | bash
+```
+
 This installs:
 
 - toolkit → `~/.local/aws-ssm-tools/`
@@ -71,6 +78,11 @@ or:
 
 ```
 curl -sSL https://raw.githubusercontent.com/kedwards/aws-ssm-tools/main/update.sh | bash
+```
+or:
+
+```
+wget -O - https://raw.githubusercontent.com/kedwards/aws-ssm-tools/main/update.sh | bash
 ```
 
 ---
