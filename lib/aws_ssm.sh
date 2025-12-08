@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 
+# Common list of AWS regions
+AWS_REGIONS=("us-east-1" "us-west-2")
+
 # Wrapper to call assume - either source it (production) or call it (tests)
 aws_assume_profile() {
   local profile="$1"
@@ -184,9 +187,8 @@ aws_ssm_connect_main() {
       return 1
     fi
 
-    local regions=("us-east-1" "us-west-2")
     local selected_region=""
-    if ! menu_select_one "Select region for $selected_profile" "" selected_region "${regions[@]}"; then
+    if ! menu_select_one "Select region for $selected_profile" "" selected_region "${AWS_REGIONS[@]}"; then
       selected_region="us-east-1"
       log_warn "No region selected, defaulting to us-east-1"
     fi
@@ -262,9 +264,8 @@ aws_ssm_execute_main() {
       return 1
     fi
 
-    local regions=("us-east-1" "us-east-2" "us-west-1" "us-west-2" "ca-central-1" "eu-west-1" "eu-central-1" "ap-southeast-1" "ap-southeast-2" "ap-northeast-1")
     local selected_region=""
-    if ! menu_select_one "Select region for $selected_profile" "" selected_region "${regions[@]}"; then
+    if ! menu_select_one "Select region for $selected_profile" "" selected_region "${AWS_REGIONS[@]}"; then
       selected_region="us-east-1"
       log_warn "No region selected, defaulting to us-east-1"
     fi
