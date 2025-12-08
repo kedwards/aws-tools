@@ -59,7 +59,7 @@ menu_select_multi() {
     # So we bind Enter to: toggle current item + accept
     [[ -n "${DEBUG_AWS_SSM:-}" ]] && echo "DEBUG: About to run fzf with ${#items[@]} items" >&2
     selections=$(printf '%s\n' "${items[@]}" |
-      fzf --multi --prompt="${prompt}: " --height=50% --reverse \
+      fzf --multi --prompt="${prompt}: " --height=~50% --reverse \
         --header="${prompt} (Tab to mark multiple, Enter to confirm)" \
         --bind 'enter:toggle+accept')
     local fzf_exit=$?

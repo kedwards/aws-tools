@@ -371,15 +371,15 @@ EOF
     status=$(aws ssm get-command-invocation \
       --command-id "$cmd_id" \
       --instance-id "$inst" \
-      --query Status --output text)
+      --query Status --output text) || true
     out=$(aws ssm get-command-invocation \
       --command-id "$cmd_id" \
       --instance-id "$inst" \
-      --query StandardOutputContent --output text)
+      --query StandardOutputContent --output text) || true
     err=$(aws ssm get-command-invocation \
       --command-id "$cmd_id" \
       --instance-id "$inst" \
-      --query StandardErrorContent --output text)
+      --query StandardErrorContent --output text) || true
 
     echo "------------------------------------"
     echo "RESULTS FROM $inst (STATUS $status):"
@@ -393,8 +393,14 @@ EOF
       echo "$err"
       echo "------------------------------------"
     }
-    [[ -z "$out" && -z "$err" ]] && echo "NO OUTPUT RETURNED"
+    if [[ -z "$out" && -z "$err" ]]; then
+      echo "NO OUTPUT RETURNED"
+    fi
   done
+  [[ -n "${DEBUG_AWS_SSM:-}" ]] && echo "DEBUG: About to return 0" >&2
+  local exit_code=0
+  [[ -n "${DEBUG_AWS_SSM:-}" ]] && echo "DEBUG: exit_code set to $exit_code" >&2
+  return $exit_code
 }
 
 aws_ssm_list_main() {

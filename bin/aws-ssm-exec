@@ -6,3 +6,4 @@ source "${SCRIPT_DIR}/../lib/init.sh"
 # Disable pipefail before running since assume uses pipes internally
 set +o pipefail
 aws_ssm_execute_main "$@"
+exit $?
