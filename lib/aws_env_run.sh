@@ -41,13 +41,12 @@ aws_env_run_main() {
     fi
     [[ -z "$selected_profiles" ]] && { log_error "No profiles selected"; return 1; }
 
-    local regions=("us-east-1" "us-east-2" "us-west-1" "us-west-2" "ca-central-1" "eu-west-1" "eu-central-1" "ap-southeast-1" "ap-southeast-2" "ap-northeast-1")
     pairs=()
 
     while IFS= read -r prof; do
       [[ -z "$prof" ]] && continue
       local sel_regions
-      if ! menu_select_multi "Select region(s) for $prof" sel_regions "${regions[@]}"; then
+      if ! menu_select_multi "Select region(s) for $prof" sel_regions "${AWS_REGIONS[@]}"; then
         log_warn "No regions selected for $prof, defaulting to us-east-1"
         sel_regions="us-east-1"
       fi
