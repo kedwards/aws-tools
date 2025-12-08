@@ -150,6 +150,38 @@ aws_ssm_connect_main() {
   local target="${1:-}"
   local instance_id instance_name
 
+  # If no AWS profile is set, prompt for profile and region
+  if [[ -z "${AWS_PROFILE:-}" ]]; then
+    local profiles
+    profiles=$(aws_list_profiles)
+    local all_profiles
+    mapfile -t all_profiles <<<"$profiles"
+
+    if [[ ${#all_profiles[@]} -eq 0 ]]; then
+      log_error "No AWS profiles found"
+      return 1
+    fi
+
+    local selected_profile=""
+    if ! menu_select_one "Select AWS profile" "" selected_profile "${all_profiles[@]}"; then
+      log_error "Profile selection cancelled"
+      return 1
+    fi
+
+    local regions=("us-east-1" "us-west-2")
+    local selected_region=""
+    if ! menu_select_one "Select region for $selected_profile" "" selected_region "${regions[@]}"; then
+      selected_region="us-east-1"
+      log_warn "No region selected, defaulting to us-east-1"
+    fi
+
+    log_info "Switching to profile $selected_profile ($selected_region)"
+    if ! source assume "$selected_profile" -r "$selected_region"; then
+      log_error "Failed to assume profile $selected_profile"
+      return 1
+    fi
+  fi
+
   if [[ -z "$target" ]]; then
     aws_get_all_running_instances ""
     if [[ ${#INSTANCE_LIST[@]} -eq 0 ]]; then
@@ -222,7 +254,10 @@ aws_ssm_execute_main() {
     fi
 
     log_info "Switching to profile $selected_profile ($selected_region)"
-    assume "$selected_profile" -r "$selected_region"
+    if ! source assume "$selected_profile" -r "$selected_region"; then
+      log_error "Failed to assume profile $selected_profile"
+      return 1
+    fi
   fi
 
   if [[ ${#instance_ids[@]} -eq 0 ]]; then
