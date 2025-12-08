@@ -1,5 +1,21 @@
 #!/usr/bin/env bash
 
+# Wrapper to call assume - either source it (production) or call it (tests)
+aws_assume_profile() {
+  local profile="$1"
+  local region="$2"
+  
+  # Check if assume is a function (test mock) or a command (production)
+  if declare -f assume >/dev/null 2>&1; then
+    # It's a function (test), just call it
+    assume "$profile" -r "$region"
+  else
+    # It's a command/script (production), source it
+    # shellcheck disable=SC1090
+    source assume "$profile" -r "$region"
+  fi
+}
+
 aws_ssm_config_get() {
   local file="$1" section="$2" key="$3"
   awk -F ' *= *' -v s="[$section]" -v k="$key" '
@@ -99,9 +115,9 @@ aws_ssm_connect_main() {
 
     # Switch profile if needed
     if [[ "${AWS_PROFILE:-}" != "$profile" || "${AWS_REGION:-}" != "$region" ]]; then
-      log_info "Switching to profile $profile ($region)"
+    log_info "Switching to profile $profile ($region)"
       # Source the assume script to set environment variables
-      if ! source assume "$profile" -r "$region"; then
+      if ! aws_assume_profile "$profile" "$region"; then
         log_error "Failed to assume profile $profile"
         return 1
       fi
@@ -176,7 +192,7 @@ aws_ssm_connect_main() {
     fi
 
     log_info "Switching to profile $selected_profile ($selected_region)"
-    if ! source assume "$selected_profile" -r "$selected_region"; then
+    if ! aws_assume_profile "$selected_profile" "$selected_region"; then
       log_error "Failed to assume profile $selected_profile"
       return 1
     fi
@@ -254,7 +270,7 @@ aws_ssm_execute_main() {
     fi
 
     log_info "Switching to profile $selected_profile ($selected_region)"
-    if ! source assume "$selected_profile" -r "$selected_region"; then
+    if ! aws_assume_profile "$selected_profile" "$selected_region"; then
       log_error "Failed to assume profile $selected_profile"
       return 1
     fi
