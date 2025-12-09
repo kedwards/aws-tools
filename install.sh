@@ -34,6 +34,11 @@ for f in "${INSTALL_DIR}/bin/"*; do
   ln -sf "${f}" "${BIN_DIR}/${cmd}"
 done
 
+# Note: Default commands.config is in INSTALL_DIR and will be loaded automatically
+# Users can create custom commands in ~/.config/aws-ssm-tools/commands.user.config
+echo "[INFO] Default commands available in ${INSTALL_DIR}/commands.config"
+echo "[INFO] Create custom commands in ~/.config/aws-ssm-tools/commands.user.config"
+
 echo ""
 echo "[SUCCESS] aws-ssm-tools installed!"
 echo ""

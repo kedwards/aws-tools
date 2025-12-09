@@ -228,23 +228,176 @@ aws_ssm_connect_main() {
   aws ssm start-session --target "$instance_id"
 }
 
+# Load saved commands from config files
+# Priority order:
+#   1. AWS_SSM_COMMAND_FILE environment variable (if set)
+#   2. User config: ~/.config/aws-ssm-tools/commands.user.config
+#   3. Default config: ~/.local/share/aws-ssm-tools/commands.config (shipped with tool)
+# User/custom commands with same name override default commands
+# Sets global arrays: COMMAND_NAMES, COMMAND_DESCRIPTIONS, COMMAND_STRINGS
+aws_ssm_load_commands() {
+  local default_config="$HOME/.local/share/aws-ssm-tools/commands.config"
+  local user_config="$HOME/.config/aws-ssm-tools/commands.user.config"
+  local custom_config="${AWS_SSM_COMMAND_FILE:-}"
+  
+  # Try alternate location for default config if not in standard location
+  if [[ ! -f "$default_config" ]]; then
+    local script_dir="$(cd -- "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+    local alt_config="${script_dir}/../commands.config"
+    if [[ -f "$alt_config" ]]; then
+      default_config="$alt_config"
+    fi
+  fi
+  
+  COMMAND_NAMES=()
+  COMMAND_DESCRIPTIONS=()
+  COMMAND_STRINGS=()
+  
+  # Helper function to load commands from a file
+  local load_from_file() {
+    local file="$1"
+    [[ ! -f "$file" ]] && return 0
+    
+    while IFS='|' read -r name desc cmd; do
+      # Skip comments and empty lines
+      [[ "$name" =~ ^#.*$ ]] && continue
+      [[ -z "$name" ]] && continue
+      
+      # Check if command already exists (for user override)
+      local found=false
+      local i
+      for i in "${!COMMAND_NAMES[@]}"; do
+        if [[ "${COMMAND_NAMES[$i]}" == "$name" ]]; then
+          # Override existing command
+          COMMAND_DESCRIPTIONS[$i]="$desc"
+          COMMAND_STRINGS[$i]="$cmd"
+          found=true
+          break
+        fi
+      done
+      
+      # Add new command if not found
+      if [[ "$found" == false ]]; then
+        COMMAND_NAMES+=("$name")
+        COMMAND_DESCRIPTIONS+=("$desc")
+        COMMAND_STRINGS+=("$cmd")
+      fi
+    done < "$file"
+  }
+  
+  # Load default commands first
+  if [[ -f "$default_config" ]]; then
+    load_from_file "$default_config"
+  fi
+  
+  # Load user commands (will override defaults with same name)
+  if [[ -f "$user_config" ]]; then
+    load_from_file "$user_config"
+  fi
+  
+  # Load custom config from environment variable (will override both default and user)
+  if [[ -n "$custom_config" ]]; then
+    if [[ -f "$custom_config" ]]; then
+      load_from_file "$custom_config"
+    else
+      log_warn "AWS_SSM_COMMAND_FILE set but file not found: $custom_config"
+    fi
+  fi
+  
+  # Return error if no commands loaded
+  if [[ ${#COMMAND_NAMES[@]} -eq 0 ]]; then
+    return 1
+  fi
+  
+  return 0
+}
+
+# Select a command from the config file using fzf
+# Returns the command string in the result_var
+aws_ssm_select_command() {
+  local __result_var="$1"
+  
+  if ! aws_ssm_load_commands; then
+    log_error "No commands found. Default commands should be in ~/.local/share/aws-ssm-tools/commands.config"
+    log_error "Create custom commands in ~/.config/aws-ssm-tools/commands.user.config"
+    log_error "Or set AWS_SSM_COMMAND_FILE environment variable to a custom config file"
+    return 1
+  fi
+  
+  if [[ ${#COMMAND_NAMES[@]} -eq 0 ]]; then
+    log_error "No commands found in config file"
+    return 1
+  fi
+  
+  # Build display array with name and description
+  local display_items=()
+  local i
+  for i in "${!COMMAND_NAMES[@]}"; do
+    display_items+=("${COMMAND_NAMES[$i]}: ${COMMAND_DESCRIPTIONS[$i]}")
+  done
+  
+  local selected
+  if ! menu_select_one "Select command to execute" "Saved SSM Commands" selected "${display_items[@]}"; then
+    log_error "No command selected"
+    return 1
+  fi
+  
+  # Extract the command name from selection
+  local selected_name="${selected%%:*}"
+  
+  # Find the corresponding command
+  for i in "${!COMMAND_NAMES[@]}"; do
+    if [[ "${COMMAND_NAMES[$i]}" == "$selected_name" ]]; then
+      local cmd="${COMMAND_STRINGS[$i]}"
+      # Expand variables in the command (e.g., $(cat ~/.ssh/id_rsa.pub))
+      cmd=$(eval "echo \"$cmd\"")
+      printf -v "$__result_var" '%s' "$cmd"
+      return 0
+    fi
+  done
+  
+  log_error "Command not found: $selected_name"
+  return 1
+}
+
 aws_ssm_execute_usage() {
   cat <<EOF
 Usage:
-  aws-ssm-exec '<command>' [INSTANCE ...]
-  aws-ssm-exec '<command>'            # interactive instance selection
+  aws-ssm-exec '<command>' [INSTANCE ...]     # execute specific command
+  aws-ssm-exec '<command>'                    # interactive instance selection
+  aws-ssm-exec --select [INSTANCE ...]        # select command from saved commands
+  aws-ssm-exec -s [INSTANCE ...]              # short form of --select
 EOF
 }
 
 aws_ssm_execute_main() {
+  local command=""
+  local select_mode=false
+  
+  # Parse arguments
   if [[ "$#" -lt 1 ]]; then
     aws_ssm_execute_usage
     return 1
   fi
-
-  local command="$1"
-  shift
+  
+  # Check if first argument is --select or -s
+  if [[ "$1" == "--select" ]] || [[ "$1" == "-s" ]]; then
+    select_mode=true
+    shift
+  else
+    command="$1"
+    shift
+  fi
+  
   local instance_ids=("$@")
+  
+  # If in select mode, prompt for command selection
+  if [[ "$select_mode" == true ]]; then
+    if ! aws_ssm_select_command command; then
+      return 1
+    fi
+    log_info "Selected command: $command"
+  fi
 
   # If no profile is set, prompt for profile and region selection
   if [[ -z "${AWS_PROFILE:-}" ]]; then

@@ -157,6 +157,29 @@ aws-ssm-exec "uptime" i-abc i-def
 aws-ssm-exec "hostname"
 ```
 
+### 📝 Using Saved Commands
+
+You can save frequently-used commands in a config file and select them interactively:
+
+```
+aws-ssm-exec --select              # select command and instances interactively
+aws-ssm-exec -s i-abc i-def        # select command, specify instances
+```
+
+Create `~/.config/aws-ssm-tools/commands.config` or `commands.config` in the script directory:
+
+```
+# Format: COMMAND_NAME|Description|Command to execute
+disk-usage|Check disk usage|df -h
+memory-info|Display memory information|free -h
+setup-user|Setup user with SSH key and sudo access|USERNAME=$(whoami); SSH_KEY='$(cat ~/.ssh/id_rsa.pub)'; ...
+```
+
+Commands can include:
+- Shell command substitutions: `$(cat ~/.ssh/id_rsa.pub)`
+- Multiple commands chained with `;` or `&&`
+- Complex logic with conditionals
+
 ## 👤 Create/Remove temporary user accounts
 
 Create a user account on remote instances with your local username, SSH key access, and passwordless sudo:

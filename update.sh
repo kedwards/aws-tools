@@ -26,6 +26,11 @@ EXTRACTED_DIR="${tmpdir}/aws-ssm-tools-main"
 echo "[INFO] Syncing files..."
 rsync -a --delete "${EXTRACTED_DIR}/" "${INSTALL_DIR}/"
 
+# Default commands.config is automatically updated in INSTALL_DIR
+# User custom commands in ~/.config/aws-ssm-tools/commands.user.config are preserved
+echo "[INFO] Default commands updated in ${INSTALL_DIR}/commands.config"
+echo "[INFO] User custom commands preserved in ~/.config/aws-ssm-tools/commands.user.config"
+
 echo ""
 echo "[SUCCESS] aws-ssm-tools updated!"
 echo ""
