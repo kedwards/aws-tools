@@ -161,24 +161,66 @@ aws-ssm-exec "hostname"
 
 You can save frequently-used commands in a config file and select them interactively:
 
-```
+```bash
 aws-ssm-exec --select              # select command and instances interactively
 aws-ssm-exec -s i-abc i-def        # select command, specify instances
 ```
 
-Create `~/.config/aws-ssm-tools/commands.config` or `commands.config` in the script directory:
+#### Configuration File
+
+The commands configuration file can be placed in one of two locations (checked in order):
+
+1. `~/.config/aws-ssm-tools/commands.config` (user config)
+2. `<script-directory>/commands.config` (project directory)
+
+**Format:** The configuration file uses a pipe-delimited format:
 
 ```
+COMMAND_NAME|Description|Command to execute
+```
+
+- Lines starting with `#` are treated as comments and ignored
+- Empty lines are ignored
+- **COMMAND_NAME**: Short identifier for the command (no spaces)
+- **Description**: Human-readable description shown in the menu
+- **Command**: The actual shell command to execute
+
+#### Quick Setup Example
+
+Create your commands config file:
+
+```bash
+mkdir -p ~/.config/aws-ssm-tools
+cat > ~/.config/aws-ssm-tools/commands.config << 'EOF'
 # Format: COMMAND_NAME|Description|Command to execute
+
+# System monitoring
 disk-usage|Check disk usage|df -h
 memory-info|Display memory information|free -h
-setup-user|Setup user with SSH key and sudo access|USERNAME=$(whoami); SSH_KEY='$(cat ~/.ssh/id_rsa.pub)'; ...
+system-uptime|Show system uptime|uptime
+process-list|Show top processes|ps aux --sort=-%mem | head -20
+
+# Docker management
+docker-status|Check Docker containers status|docker ps -a
+docker-clean|Clean up stopped containers and unused images|docker container prune -f && docker image prune -f
+
+# Logs
+tail-syslog|Tail system log|tail -f /var/log/syslog
+EOF
 ```
 
+#### Advanced Features
+
 Commands can include:
-- Shell command substitutions: `$(cat ~/.ssh/id_rsa.pub)`
-- Multiple commands chained with `;` or `&&`
-- Complex logic with conditionals
+- **Command substitutions** (run locally): `'$(cat ~/.ssh/id_rsa.pub)'`
+- **Multiple commands** chained with `;` or `&&`
+- **Complex logic** with conditionals using `if/then/else`
+- **Remote variables** using `\$VARIABLE` (escaped, evaluated on remote host)
+
+Example complex command:
+```bash
+setup-qp-user|Setup qp user with SSH key and sudo access|USERNAME=qp; SSH_KEY='$(cat ~/.ssh/id_rsa.pub)'; if ! id \$USERNAME &>/dev/null; then useradd -m -s /bin/bash \$USERNAME && echo User \$USERNAME created; else echo User \$USERNAME already exists; fi; mkdir -p /home/\$USERNAME/.ssh && chmod 700 /home/\$USERNAME/.ssh && echo \$SSH_KEY > /home/\$USERNAME/.ssh/authorized_keys && chmod 600 /home/\$USERNAME/.ssh/authorized_keys && chown -R \$USERNAME:\$USERNAME /home/\$USERNAME/.ssh && printf '%s ALL=(ALL) NOPASSWD: ALL\n' \$USERNAME > /etc/sudoers.d/user_temp_access && chmod 440 /etc/sudoers.d/user_temp_access && echo Setup complete for user \$USERNAME with sudo access
+```
 
 ## 👤 Create/Remove temporary user accounts
 
