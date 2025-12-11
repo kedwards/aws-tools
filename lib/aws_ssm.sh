@@ -254,7 +254,7 @@ aws_ssm_load_commands() {
   COMMAND_STRINGS=()
   
   # Helper function to load commands from a file
-  local load_from_file() {
+  load_from_file() {
     local file="$1"
     [[ ! -f "$file" ]] && return 0
     
