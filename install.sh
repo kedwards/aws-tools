@@ -34,6 +34,18 @@ for f in "${INSTALL_DIR}/bin/"*; do
   ln -sf "${f}" "${BIN_DIR}/${cmd}"
 done
 
+# Create ssmx alias (symlink to aws-ssm-exec)
+if [[ -f "${BIN_DIR}/aws-ssm-exec" ]]; then
+  ln -sf "aws-ssm-exec" "${BIN_DIR}/ssmx"
+  echo "[INFO] Created ssmx alias for aws-ssm-exec"
+fi
+
+# Symlink unified ssm command if it exists
+if [[ -f "${INSTALL_DIR}/ssm" ]]; then
+  ln -sf "${INSTALL_DIR}/ssm" "${BIN_DIR}/ssm"
+  echo "[INFO] Created unified ssm command"
+fi
+
 # Note: Default commands.config is in INSTALL_DIR and will be loaded automatically
 # Users can create custom commands in ~/.config/aws-ssm-tools/commands.user.config
 echo "[INFO] Default commands available in ${INSTALL_DIR}/commands.config"
@@ -46,7 +58,22 @@ echo "Ensure ~/.local/bin is in your PATH:"
 echo ""
 echo '  export PATH="$HOME/.local/bin:$PATH"'
 echo ""
-echo "Try the commands:"
-echo "  aws-ssm-connect --help"
-echo "  aws-ssm-exec --help"
+echo "Available commands:"
+echo ""
+echo "Traditional CLI:"
+echo "  aws-ssm-connect    # Connect to instances"
+echo "  aws-ssm-exec       # Execute commands"
+echo "  ssmx               # Alias for aws-ssm-exec"
+echo "  aws-ssm-list       # List active sessions"
+echo "  aws-ssm-kill       # Kill active sessions"
+echo ""
+echo "Unified CLI:"
+echo "  ssm connect        # Connect to instances"
+echo "  ssm exec           # Execute commands"
+echo "  ssm list           # List active sessions"
+echo "  ssm kill           # Kill active sessions"
+echo ""
+echo "Try:"
+echo "  ssmx --help"
+echo "  ssm exec --help"
 echo ""

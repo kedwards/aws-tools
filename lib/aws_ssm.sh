@@ -3,22 +3,6 @@
 # Common list of AWS regions
 AWS_REGIONS=("us-east-1" "us-west-2")
 
-# Wrapper to call assume - either source it (production) or call it (tests)
-aws_assume_profile() {
-  local profile="$1"
-  local region="$2"
-  
-  # Check if assume is a function (test mock) or a command (production)
-  if declare -f assume >/dev/null 2>&1; then
-    # It's a function (test), just call it
-    assume "$profile" -r "$region"
-  else
-    # It's a command/script (production), source it
-    # shellcheck disable=SC1090
-    source assume "$profile" -r "$region"
-  fi
-}
-
 aws_ssm_config_get() {
   local file="$1" section="$2" key="$3"
   awk -F ' *= *' -v s="[$section]" -v k="$key" '
