@@ -68,6 +68,38 @@ aws_sso_validate_or_login() {
 }
 
 # ================================================================
+#  GRANTED ASSUME PROFILE (for traditional bin commands)
+# ================================================================
+aws_assume_profile() {
+  local profile="$1"
+  local region="$2"
+
+  log_info "Assuming AWS profile '$profile' in region '$region'"
+
+  export AWS_PROFILE="$profile"
+  export AWS_REGION="$region"
+
+  # Capture Granted credentials
+  local cred_line
+  cred_line=$(assumego "$profile" -r "$region" 2>/dev/null | sed -n 's/^GrantedAssume //p')
+
+  if [[ -z "$cred_line" ]]; then
+    log_error "Failed to obtain credentials from assumego"
+    return 1
+  fi
+
+  # cred_line format:
+  # AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN AWS_PROFILE AWS_SESSION_EXPIRATION
+  read -r AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN AWS_PROFILE AWS_SESSION_EXPIRATION <<< "$cred_line"
+
+  export AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN AWS_SESSION_EXPIRATION AWS_PROFILE
+
+  log_debug "Exported Granted session credentials:"
+  log_debug "AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:0:4}****"
+  log_debug "AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN:0:10}****"
+}
+
+# ================================================================
 #  PROFILE + REGION SELECTION LOGIC
 # ================================================================
 aws_list_profiles() {
