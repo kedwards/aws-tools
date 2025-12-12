@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+
+export GRANTED_NO_BROWSER=true
+export GRANTED_DISABLE_PROMPTS=true
+
+
+set -o pipefail
+
+shopt -s expand_aliases
+
+script_dir="$(cd -- "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Load libs
+# shellcheck source=/dev/null
+source "$script_dir/lib/logging.sh"
+# shellcheck source=/dev/null
+source "$script_dir/lib/menu.sh"
+# shellcheck source=/dev/null
+source "$script_dir/lib/common.sh"
+# shellcheck source=/dev/null
+source "$script_dir/lib/flags.sh"
+# shellcheck source=/dev/null
+source "$script_dir/lib/connect.sh"
+# shellcheck source=/dev/null
+source "$script_dir/lib/exec.sh"
+# shellcheck source=/dev/null
+source "$script_dir/lib/list.sh"
+# shellcheck source=/dev/null
+source "$script_dir/lib/kill.sh"
+
+# Load user aliases so assume works in non-interactive shell
+if [[ -f "$HOME/.bash_profile" ]]; then
+  source "$HOME/.bash_profile"
+elif [[ -f "$HOME/.bashrc" ]]; then
+  source "$HOME/.bashrc"
+fi
+
+aws_assume_profile() {
+  local profile="$1"
+  local region="$2"
+
+  log_info "Assuming AWS profile '$profile' in region '$region'"
+
+  export AWS_PROFILE="$profile"
+  export AWS_REGION="$region"
+
+  # Capture Granted credentials
+  local cred_line
+  cred_line=$(assumego "$profile" -r "$region" 2>/dev/null | sed -n 's/^GrantedAssume //p')
+
+  if [[ -z "$cred_line" ]]; then
+    log_error "Failed to obtain credentials from assumego"
+    return 1
+  fi
+
+  # cred_line format:
+  # AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN AWS_PROFILE AWS_SESSION_EXPIRATION
+  read -r AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN AWS_PROFILE AWS_SESSION_EXPIRATION <<< "$cred_line"
+
+  export AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN AWS_SESSION_EXPIRATION AWS_PROFILE
+
+  log_debug "Exported Granted session credentials:"
+  log_debug "AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:0:4}****"
+  log_debug "AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN:0:10}****"
+}
+
+
+ssm_usage() {
+  cat <<EOF
+Usage: ssm <command> [options]
+
+Commands:
+  connect   Connect to an instance via SSM (shell or port-forward)
+  exec      Run a shell command via SSM on instances
+  list      List active SSM sessions on this host
+  kill      Kill active SSM sessions on this host
+
+Run 'ssm <command> --help' for more information on a command.
+EOF
+}
+
+ssm_main() {
+  local cmd="${1:-}"
+  if [[ -z "$cmd" ]] || [[ "$cmd" == "-h" ]] || [[ "$cmd" == "--help" ]]; then
+    ssm_usage
+    [[ -z "$cmd" ]] && return 1 || return 0
+  fi
+  shift || true
+
+  case "$cmd" in
+    connect) ssm_connect "$@" ;;
+    exec)    ssm_exec "$@" ;;
+    list)    ssm_list "$@" ;;
+    kill)    ssm_kill "$@" ;;
+    *)
+      log_error "Unknown subcommand: $cmd"
+      ssm_usage
+      return 1
+      ;;
+  esac
+}
+
+ssm_main "$@"
+

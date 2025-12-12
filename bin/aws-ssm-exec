@@ -5,5 +5,12 @@ source "${SCRIPT_DIR}/../lib/init.sh"
 
 # Disable pipefail before running since assume uses pipes internally
 set +o pipefail
-aws_ssm_execute_main "$@"
+
+# Check if new modular function exists (rewrite branch)
+if declare -f ssm_exec >/dev/null 2>&1; then
+  ssm_exec "$@"
+else
+  # Fall back to old monolithic function (main branch)
+  aws_ssm_execute_main "$@"
+fi
 exit $?
