@@ -1,0 +1,5 @@
+# aws-tools command
+# Lambda functions with runtime and memory
+aws lambda list-functions \
+  --query 'Functions[*].[FunctionName,Runtime,MemorySize,LastModified]' \
+  --output table

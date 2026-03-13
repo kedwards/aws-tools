@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# Sync engine AMI — copy /ec2/ami/engine/ami-id to /ec2/ami/engine/ami_id
+set -euo pipefail
+
+SRC="/ec2/ami/engine/ami-id"
+DST="/ec2/ami/engine/ami_id"
+
+# Fetch current values
+src_val=$(aws ssm get-parameter --name "$SRC" --query 'Parameter.Value' --output text 2>/dev/null || echo "NOT_FOUND")
+dst_val=$(aws ssm get-parameter --name "$DST" --query 'Parameter.Value' --output text 2>/dev/null || echo "NOT_FOUND")
+
+echo "  Source ($SRC) : $src_val"
+echo "  Target ($DST) : $dst_val"
+echo ""
+
+if [[ "$src_val" == "NOT_FOUND" ]]; then
+  echo "✘ Source parameter not found, nothing to sync."
+  exit 1
+fi
+
+if [[ "$src_val" == "$dst_val" ]]; then
+  echo "✔ Already in sync — no update needed."
+  exit 0
+fi
+
+# Confirm before updating
+read -rp "Update $DST to $src_val? [y/N] " confirm
+if [[ "${confirm,,}" != "y" ]]; then
+  echo "Aborted."
+  exit 0
+fi
+
+aws ssm put-parameter \
+  --name "$DST" \
+  --value "$src_val" \
+  --type String \
+  --overwrite
+
+echo ""
+echo "✔ Updated $DST → $src_val"

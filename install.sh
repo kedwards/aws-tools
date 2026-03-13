@@ -65,6 +65,15 @@ else
   echo "[WARN] examples/connections.config not found, skipping default connections"
 fi
 
+# Deploy default run-commands from examples/run-commands/
+if [[ -d "${INSTALL_DIR}/examples/run-commands" ]]; then
+  echo "[INFO] Installing default run-commands..."
+  mkdir -p "${INSTALL_DIR}/run-commands"
+  rsync -a --delete "${INSTALL_DIR}/examples/run-commands/" "${INSTALL_DIR}/run-commands/"
+else
+  echo "[WARN] examples/run-commands not found, skipping default run-commands"
+fi
+
 # Symlink the bin/ commands
 echo "[INFO] Creating symlinks in ${BIN_DIR}"
 for f in "${INSTALL_DIR}/bin/"*; do
@@ -76,8 +85,10 @@ done
 # Users can create custom configs in ~/.config/aws-ssm-tools/
 echo "[INFO] Default commands available in ${INSTALL_DIR}/commands.config"
 echo "[INFO] Default connections available in ${INSTALL_DIR}/connections.config"
+echo "[INFO] Default run-commands available in ${INSTALL_DIR}/run-commands/"
 echo "[INFO] Create custom commands in ~/.config/${REPO_NAME}/commands.user.config"
 echo "[INFO] Create custom connections in ~/.config/${REPO_NAME}/connections.user.config"
+echo "[INFO] Create custom run-commands in ~/.config/${REPO_NAME}/run-commands/"
 
 # Show installed version
 INSTALLED_VERSION="$(cat "${INSTALL_DIR}/VERSION" 2>/dev/null || echo 'unknown')"
