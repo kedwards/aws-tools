@@ -72,11 +72,22 @@ else
   echo "[WARN] examples/connections.config not found, default connections may be outdated"
 fi
 
+# Update default run-commands from examples/run-commands/
+if [[ -d "${INSTALL_DIR}/examples/run-commands" ]]; then
+  echo "[INFO] Updating default run-commands..."
+  mkdir -p "${INSTALL_DIR}/run-commands"
+  rsync -a --delete "${INSTALL_DIR}/examples/run-commands/" "${INSTALL_DIR}/run-commands/"
+else
+  echo "[WARN] examples/run-commands not found, default run-commands may be outdated"
+fi
+
 # User custom configs in ~/.config/aws-ssm-tools/ are preserved
 echo "[INFO] Default commands updated in ${INSTALL_DIR}/commands.config"
 echo "[INFO] Default connections updated in ${INSTALL_DIR}/connections.config"
+echo "[INFO] Default run-commands updated in ${INSTALL_DIR}/run-commands/"
 echo "[INFO] User custom commands preserved in ~/.config/${REPO_NAME}/commands.user.config"
 echo "[INFO] User custom connections preserved in ~/.config/${REPO_NAME}/connections.user.config"
+echo "[INFO] User run-commands preserved in ~/.config/${REPO_NAME}/run-commands/"
 
 # Show new version
 NEW_VERSION="$(cat "${INSTALL_DIR}/VERSION" 2>/dev/null || echo 'unknown')"

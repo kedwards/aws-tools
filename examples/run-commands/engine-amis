@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+# Engine AMI report — instances, AMIs, and parameter store comparison
+set -euo pipefail
+
+# --- Running Instances & AMIs ---
+echo "=== Running Instances ==="
+instances=$(aws ec2 describe-instances \
+  --filters "Name=instance-state-name,Values=running" \
+  --output json)
+
+instance_count=$(jq '[.Reservations[].Instances[]] | length' <<< "$instances")
+if [[ "$instance_count" -eq 0 ]]; then
+  echo "No running instances found."
+else
+  ami_ids=$(jq -r '[.Reservations[].Instances[].ImageId] | unique | .[]' <<< "$instances")
+
+  # shellcheck disable=SC2086
+  images=$(aws ec2 describe-images --image-ids $ami_ids --output json 2>/dev/null || echo '{"Images":[]}')
+
+  (echo -e "Name\tInstanceId\tLaunchTime\tAMI_ID\tAMI_Name\tAMI_Created"
+  jq -r --argjson imgs "$images" '
+    ($imgs.Images | map({(.ImageId): {n:.Name, d:.CreationDate}}) | add // {}) as $m |
+    .Reservations[].Instances[] |
+    [(.Tags//[]|map(select(.Key=="Name"))|.[0].Value//"N/A"),
+     .InstanceId, .LaunchTime, .ImageId, ($m[.ImageId].n//"N/A"), ($m[.ImageId].d//"N/A")]|@tsv
+  ' <<< "$instances" | sort) | column -t -s $'\t'
+fi
+
+# --- Parameter Store Comparison ---
+echo ""
+echo "=== Parameter Store AMI Comparison ==="
+
+ami_underscore=$(aws ssm get-parameter --name "/ec2/ami/engine/ami_id" --query 'Parameter.Value' --output text 2>/dev/null || echo "NOT_FOUND")
+ami_hyphen=$(aws ssm get-parameter --name "/ec2/ami/engine/ami-id" --query 'Parameter.Value' --output text 2>/dev/null || echo "NOT_FOUND")
+
+printf "\n  %-28s %s\n" "/ec2/ami/engine/ami_id :" "$ami_underscore"
+printf "  %-28s %s\n\n" "/ec2/ami/engine/ami-id :" "$ami_hyphen"
+
+if [[ "$ami_underscore" == "NOT_FOUND" && "$ami_hyphen" == "NOT_FOUND" ]]; then
+  echo "  ⚠ Neither parameter found"
+elif [[ "$ami_underscore" == "NOT_FOUND" || "$ami_hyphen" == "NOT_FOUND" ]]; then
+  echo "  ⚠ One parameter not found"
+elif [[ "$ami_underscore" == "$ami_hyphen" ]]; then
+  echo "  ✔ Both parameters point to the same AMI"
+else
+  echo "  ✘ MISMATCH — parameters reference different AMIs"
+fi
+
+# --- AMI Details for Parameter Store Values ---
+echo ""
+echo "=== Parameter Store AMI Details ==="
+
+param_amis=()
+[[ "$ami_underscore" != "NOT_FOUND" ]] && param_amis+=("$ami_underscore")
+[[ "$ami_hyphen" != "NOT_FOUND" && "$ami_hyphen" != "$ami_underscore" ]] && param_amis+=("$ami_hyphen")
+
+if [[ ${#param_amis[@]} -eq 0 ]]; then
+  echo "No AMI IDs found in parameter store."
+else
+  # shellcheck disable=SC2068
+  param_images=$(aws ec2 describe-images --image-ids ${param_amis[@]} --output json 2>/dev/null || echo '{"Images":[]}')
+
+  (echo -e "Source\tAMI_ID\tName\tCreated\tState"
+  for ami in "${param_amis[@]}"; do
+    src=""
+    if [[ "$ami" == "$ami_underscore" && "$ami" == "$ami_hyphen" ]]; then
+      src="both"
+    elif [[ "$ami" == "$ami_underscore" ]]; then
+      src="ami_id"
+    else
+      src="ami-id"
+    fi
+    jq -r --arg ami "$ami" --arg src "$src" '
+      .Images[] | select(.ImageId == $ami) |
+      [$src, .ImageId, (.Name//"N/A"), (.CreationDate//"N/A"), (.State//"N/A")] | @tsv
+    ' <<< "$param_images"
+  done) | column -t -s $'\t'
+fi

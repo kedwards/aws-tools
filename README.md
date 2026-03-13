@@ -53,6 +53,7 @@ ssm --version
 - `aws` CLI
 - [`assume` (Granted)](https://granted.dev) - for AWS SSO authentication
 - `session-manager-plugin` - for SSM connections
+- `rsync` - used by `install.sh` and `update.sh` to sync run-commands
 
 **Optional:**
 - `fzf` - for enhanced interactive menus (falls back to bash `select`)
@@ -199,7 +200,13 @@ Run a command or script against one or more AWS profiles.
 
 **Options:**
 - `-q <command>` - Run an inline AWS command
-- `-d <path>` - Override the commands directory
+- `-d <path>` - Use only this commands directory (overrides defaults)
+
+**Command Directories (checked in priority order):**
+1. `~/.local/share/aws-ssm-tools/run-commands/` — default scripts shipped with the tool
+2. `~/.config/aws-ssm-tools/run-commands/` — your custom scripts (never overwritten by updates)
+
+User scripts with the same name as a default script override the default. Use `-d` or `AWS_TOOLS_CMD_DIR` for an exclusive single-directory override.
 
 **Filters:**
 Space-separated profile names or `profile:region` pairs. When no filter is given, saved commands iterate all profiles. Default region is `us-east-1`.
@@ -228,7 +235,7 @@ ssm run instances
 # Run executable per profile
 ssm run instances "dev:us-west-2"
 
-# Custom commands directory
+# Custom commands directory (exclusive override)
 ssm run -d /path/to/commands my-script
 ```
 
@@ -285,7 +292,7 @@ ssm update main
 
 ## Configuration
 
-### Saved Commands
+### Saved Commands (`ssm exec`)
 
 Default commands are installed to `~/.local/share/aws-ssm-tools/commands.config` from `examples/commands.config`.
 
@@ -312,6 +319,49 @@ my-check|Custom health check|curl http://localhost:8080/health
 restart-app|Restart application|systemctl restart myapp
 EOF
 ```
+
+### Run Commands (`ssm run`)
+
+Default run-commands are installed to `~/.local/share/aws-ssm-tools/run-commands/` from `examples/run-commands/`.
+
+Bundled scripts:
+
+| Command | Description | Type |
+|---|---|---|
+| `cfn-stacks` | CloudFormation stacks with status | snippet |
+| `ecs-services` | ECS clusters and service status | script |
+| `engine-ami-sync` | Sync engine AMI parameter store values | script |
+| `engine-amis` | Engine AMI report with parameter store comparison | script |
+| `iam-users` | IAM users with creation date and last password use | snippet |
+| `instances` | Running instances with AMI name and creation date | script |
+| `lambda-functions` | Lambda functions with runtime and memory | snippet |
+| `rds-instances` | RDS instances with engine versions | snippet |
+| `s3-buckets` | S3 buckets with region and creation date | snippet |
+| `security-groups` | Security groups with VPC and description | snippet |
+| `vpc-cidrs` | VPC CIDRs, names and account IDs | snippet |
+
+**Adding Custom Run Commands:**
+```bash
+# Create user run-commands directory (never overwritten by updates)
+mkdir -p ~/.config/aws-ssm-tools/run-commands
+
+# Add a snippet (non-executable)
+cat > ~/.config/aws-ssm-tools/run-commands/my-report <<'EOF'
+# aws-tools command
+# My custom AWS report
+aws ec2 describe-instances --output table
+EOF
+
+# Add an executable script
+cat > ~/.config/aws-ssm-tools/run-commands/my-script <<'EOF'
+#!/usr/bin/env bash
+# My custom script
+echo "Running as profile: $AWS_PROFILE"
+EOF
+chmod +x ~/.config/aws-ssm-tools/run-commands/my-script
+```
+
+User scripts with the same name as a bundled script override the bundled version (shown with `+` in `ssm run` listing).
 
 ### Port Forwarding Config
 
@@ -352,7 +402,7 @@ ssm connect --config
 - `MENU_NON_INTERACTIVE` - Disable interactive prompts
 - `MENU_NO_FZF` - Force bash `select` instead of fzf
 - `AWS_SSM_COMMAND_FILE` - Custom commands file path
-- `AWS_TOOLS_CMD_DIR` - Override commands directory for `ssm run` (default: `~/.local/lib/aws-tools/commands`)
+- `AWS_TOOLS_CMD_DIR` - Exclusive single-directory override for `ssm run` (bypasses default + user dir merging)
 - `AWS_AUTH_AUTO_LOGIN` - Set to `1` to auto-login when credentials are missing
 - `AWS_AUTH_DISABLE_ASSUME` - Set to `1` to skip assume calls (for testing)
 

@@ -1,0 +1,5 @@
+# aws-tools command
+# RDS instances with engine versions
+aws rds describe-db-instances \
+  --query 'DBInstances[*].[DBInstanceIdentifier,Engine,EngineVersion,DBInstanceClass,DBInstanceStatus]' \
+  --output table

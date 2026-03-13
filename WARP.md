@@ -269,6 +269,7 @@ Config sections can be selected interactively via `ssm connect --config`.
 - `bash` (4.0+)
 - `aws` CLI
 - `assume` (Granted) - for AWS SSO authentication
+- `rsync` - used by install.sh/update.sh to sync run-commands
 - BATS - for running tests
 
 **Optional:**
@@ -277,7 +278,7 @@ Config sections can be selected interactively via `ssm connect --config`.
 
 ## Implementation Status
 
-**Completed Commands** (155 tests passing):
+**Completed Commands** (284 tests passing):
 - `ssm login` - AWS SSO authentication via Granted
 - `ssm connect` - Shell sessions and config-based port forwarding
 - `ssm exec` - Multi-instance command execution (54 tests)
@@ -290,7 +291,10 @@ Config sections can be selected interactively via `ssm connect --config`.
   - Snippet files with `#ENV`/`#REGION` placeholder substitution
   - Executable scripts (run directly or iterated per-profile)
   - Inline queries via `-q`
-  - Custom commands directory via `-d` or `AWS_TOOLS_CMD_DIR`
+  - Multi-source command resolution: installed defaults + user dir (merged, user overrides)
+  - Custom commands directory via `-d` or `AWS_TOOLS_CMD_DIR` (exclusive override)
+  - 11 bundled run-commands deployed to `~/.local/share/aws-ssm-tools/run-commands/`
+  - User scripts in `~/.config/aws-ssm-tools/run-commands/` (never overwritten)
   - Profile iteration with `source assume` per entry
   - Filter by profile or profile:region pairs
 - `ssm creds` - AWS credential management
@@ -305,8 +309,14 @@ The auth layer (`lib/core/aws_auth.sh`) provides two modes:
 - **Active login** (`aws_auth_login`) - Calls `source assume` to obtain credentials; used by `login`, `run`
 - **Auto-login** - Set `AWS_AUTH_AUTO_LOGIN=1` to make `aws_auth_assume` automatically call `aws_auth_login` when no credentials are found
 
-### Profile-Iteration Commands (aws-tools)
-The `ssm run` command uses commands stored in `~/.local/lib/aws-tools/commands/` (configurable via `AWS_TOOLS_CMD_DIR`).
+### Profile-Iteration Commands (ssm run)
+The `ssm run` command resolves scripts from multiple directories in priority order:
+1. `~/.local/share/aws-ssm-tools/run-commands/` - Default scripts shipped with the tool (from `examples/run-commands/`)
+2. `~/.config/aws-ssm-tools/run-commands/` - User-defined scripts (never overwritten by install/update)
+
+A user script with the same name as a default script overrides it. Both directories are merged when listing commands — user scripts are marked with `+` in the output.
+
+Using `-d <path>` or setting `AWS_TOOLS_CMD_DIR` bypasses merging and uses only that single directory.
 
 **Snippet files** (non-executable) contain AWS CLI commands with optional placeholders:
 ```
@@ -317,3 +327,18 @@ aws ec2 describe-vpcs --query 'Vpcs[*].[...]' --output table
 
 **Executable scripts** (chmod +x) are full bash scripts invoked directly.
 When a filter is provided, they run once per profile after `source assume`.
+
+**Bundled run-commands** (in `examples/run-commands/`):
+- `cfn-stacks` - CloudFormation stacks with status
+- `ecs-services` - ECS clusters and service status `*`
+- `engine-ami-sync` - Sync engine AMI parameter store values `*`
+- `engine-amis` - Engine AMI report with parameter store comparison `*`
+- `iam-users` - IAM users with creation date and last password use
+- `instances` - Running instances with AMI name and creation date `*`
+- `lambda-functions` - Lambda functions with runtime and memory
+- `rds-instances` - RDS instances with engine versions
+- `s3-buckets` - S3 buckets with region and creation date
+- `security-groups` - Security groups with VPC and description
+- `vpc-cidrs` - VPC CIDRs, names and account IDs
+
+`*` = executable script (runs directly without profile iteration when no filter given)
