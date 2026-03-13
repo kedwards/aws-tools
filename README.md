@@ -4,14 +4,16 @@ A Bash-based CLI tool for managing AWS Systems Manager (SSM) sessions with inter
 
 ## Features
 
-- 🔐 **AWS Authentication** - Integration with [Granted](https://granted.dev) for AWS SSO
+- 🔐 **AWS Authentication** - Integration with [Granted](https://granted.dev) for AWS SSO login
 - 🖥️ **Interactive Menus** - fzf-powered selection with fallback to bash `select`
 - 🚀 **Shell Sessions** - Quick SSM session connections to EC2 instances
 - ⚡ **Command Execution** - Run commands on multiple instances simultaneously
+- 🔄 **Profile Iteration** - Run commands/scripts across multiple AWS profiles
+- 🔑 **Credential Management** - Store and re-apply AWS credentials
 - 📋 **Session Management** - List and terminate active SSM sessions
 - 🔌 **Port Forwarding** - Config-based port forwarding to instances
-- 💾 **Saved Commands** - Reusable command library
-- ✅ **100+ Tests** - Comprehensive test coverage with BATS
+- 💾 **Saved Commands** - Reusable command library with snippet placeholders
+- ✅ **250+ Tests** - Comprehensive test coverage with BATS
 
 ## Installation
 
@@ -60,14 +62,15 @@ ssm --version
 ### 1. Authentication
 
 ```bash
-# Authenticate
+# Login via ssm (interactive profile/region selection)
+ssm login
+
+# Login to a specific profile
+ssm login -p prod -r us-east-1
+
+# Or authenticate directly with assume
 assume prod -r us-east-1
-
-# Verify authentication
-aws sts get-caller-identity
 ```
-
-**Note:** Due to shell limitations, `assume` must be run directly in your terminal to export credentials properly.
 
 ### 2. Connect to an Instance
 
@@ -95,7 +98,33 @@ ssm exec -c "uptime" -i "web-server;db-server"
 ssm exec -c disk-usage -i prod-app
 ```
 
-### 4. Manage Sessions
+### 4. Run Across Profiles
+
+```bash
+# List available commands
+ssm run
+
+# Run a saved snippet across profiles
+ssm run vpc-cidrs "dev prod"
+
+# Run inline query
+ssm run -q "aws s3 ls" "staging:us-west-2"
+
+# Run executable script
+ssm run instances
+```
+
+### 5. Credential Management
+
+```bash
+# Store credentials for an environment
+eval "$(ssm creds store myenv)"
+
+# Re-apply stored credentials
+eval "$(ssm creds use)"
+```
+
+### 6. Manage Sessions
 
 ```bash
 # List active sessions
@@ -106,6 +135,22 @@ ssm kill
 ```
 
 ## Commands
+
+### `ssm login`
+Authenticate with AWS via Granted (`assume`).
+
+**Options:**
+- `-p, --profile` - AWS profile to assume
+- `-r, --region` - AWS region
+
+**Examples:**
+```bash
+# Interactive profile/region selection
+ssm login
+
+# Login to specific profile and region
+ssm login -p prod -r us-west-2
+```
 
 ### `ssm connect`
 Start an SSM shell session or port forwarding to an EC2 instance.
@@ -147,6 +192,60 @@ ssm exec -c "df -h" -i "web1;web2;web3"
 
 # Use saved command
 ssm exec -c system-uptime -p prod
+```
+
+### `ssm run`
+Run a command or script against one or more AWS profiles.
+
+**Options:**
+- `-q <command>` - Run an inline AWS command
+- `-d <path>` - Override the commands directory
+
+**Filters:**
+Space-separated profile names or `profile:region` pairs. When no filter is given, saved commands iterate all profiles. Default region is `us-east-1`.
+
+**Snippet Placeholders:**
+- `#ENV` - Replaced with the current profile name
+- `#REGION` - Replaced with the current region
+
+**Examples:**
+```bash
+# List available commands
+ssm run
+
+# Run snippet across profiles
+ssm run vpc-cidrs "dev prod"
+
+# Run with profile:region pairs
+ssm run cfn-stacks "prod:us-east-1 staging:us-west-2"
+
+# Inline query
+ssm run -q "aws s3 ls" "prod staging"
+
+# Run executable script directly
+ssm run instances
+
+# Run executable per profile
+ssm run instances "dev:us-west-2"
+
+# Custom commands directory
+ssm run -d /path/to/commands my-script
+```
+
+### `ssm creds`
+Manage AWS credentials for the current shell.
+
+**Subcommands:**
+- `store <env>` - Export AWS credentials for `<env>` into the current shell
+- `use` - Re-apply stored credentials (AK/SK/ST) as AWS_ env vars
+
+**Examples:**
+```bash
+# Store credentials
+eval "$(ssm creds store myenv)"
+
+# Re-apply stored credentials
+eval "$(ssm creds use)"
 ```
 
 ### `ssm list`
@@ -253,6 +352,9 @@ ssm connect --config
 - `MENU_NON_INTERACTIVE` - Disable interactive prompts
 - `MENU_NO_FZF` - Force bash `select` instead of fzf
 - `AWS_SSM_COMMAND_FILE` - Custom commands file path
+- `AWS_TOOLS_CMD_DIR` - Override commands directory for `ssm run` (default: `~/.local/lib/aws-tools/commands`)
+- `AWS_AUTH_AUTO_LOGIN` - Set to `1` to auto-login when credentials are missing
+- `AWS_AUTH_DISABLE_ASSUME` - Set to `1` to skip assume calls (for testing)
 
 ## Updating
 
@@ -352,8 +454,10 @@ See [RELEASE.md](RELEASE.md) for detailed release management documentation.
 
 ### "No AWS credentials found"
 
-Run `assume` directly:
+Use `ssm login` or run `assume` directly:
 ```bash
+ssm login -p your-profile -r us-east-1
+# or
 assume your-profile -r us-east-1
 ```
 

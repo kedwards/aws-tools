@@ -85,7 +85,7 @@ The codebase follows a layered architecture with clear separation of concerns:
 - `logging.sh` - Structured logging with levels, colors, timestamps, and file rotation
 - `flags.sh` - Common flag parsing (--dry-run, --profile, --region, --yes, --config)
 - `interaction.sh` - Interactive mode guards and browser opening
-- `aws_auth.sh` - AWS authentication via Granted (SSO) with validation
+- `aws_auth.sh` - AWS authentication via Granted (SSO) with validation and active login
 - `aws.sh` - AWS CLI utilities
 - `tty.sh` - TTY detection
 - `test_guard.sh` - Function override protection for tests
@@ -107,6 +107,8 @@ The codebase follows a layered architecture with clear separation of concerns:
 - `ssm_login.sh` - Interactive AWS SSO login via Granted
 - `ssm_connect.sh` - Connect to instances (shell or port-forward modes)
 - `ssm_exec.sh` - Execute commands on multiple instances with polling and output display
+- `ssm_run.sh` - Run commands/scripts across AWS profiles (ported from aws-tools)
+- `ssm_creds.sh` - AWS credential store/use management
 - `ssm_list.sh` - List active SSM sessions
 - `ssm_kill.sh` - Terminate SSM sessions
 
@@ -284,8 +286,34 @@ Config sections can be selected interactively via `ssm connect --config`.
   - Semicolon-separated multi-instance targeting
   - Real-time polling with status updates
   - Stdout/stderr display from all instances
+- `ssm run` - Run commands/scripts across AWS profiles (integrated from aws-tools)
+  - Snippet files with `#ENV`/`#REGION` placeholder substitution
+  - Executable scripts (run directly or iterated per-profile)
+  - Inline queries via `-q`
+  - Custom commands directory via `-d` or `AWS_TOOLS_CMD_DIR`
+  - Profile iteration with `source assume` per entry
+  - Filter by profile or profile:region pairs
+- `ssm creds` - AWS credential management
+  - `store <env>` - Capture credentials via Granted into shell env vars
+  - `use` - Re-apply stored AK/SK/ST as AWS_ env vars
 - `ssm list` - List active SSM sessions
 - `ssm kill` - Terminate active sessions
 
-**Current Branch**: `feature/arch-split`
-Consolidating three versions of the tool with improved architecture and comprehensive test coverage.
+### AWS Auth Layer
+The auth layer (`lib/core/aws_auth.sh`) provides two modes:
+- **Validate-only** (`aws_auth_assume`) - Checks for existing credentials; used by `connect`, `exec`, `list`, `kill`
+- **Active login** (`aws_auth_login`) - Calls `source assume` to obtain credentials; used by `login`, `run`
+- **Auto-login** - Set `AWS_AUTH_AUTO_LOGIN=1` to make `aws_auth_assume` automatically call `aws_auth_login` when no credentials are found
+
+### Profile-Iteration Commands (aws-tools)
+The `ssm run` command uses commands stored in `~/.local/lib/aws-tools/commands/` (configurable via `AWS_TOOLS_CMD_DIR`).
+
+**Snippet files** (non-executable) contain AWS CLI commands with optional placeholders:
+```
+# aws-tools command
+# VPC CIDRs, names and account IDs
+aws ec2 describe-vpcs --query 'Vpcs[*].[...]' --output table
+```
+
+**Executable scripts** (chmod +x) are full bash scripts invoked directly.
+When a filter is provided, they run once per profile after `source assume`.

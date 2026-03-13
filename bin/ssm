@@ -26,10 +26,13 @@ source "$ROOT_DIR/lib/aws/ec2.sh"
 source "$ROOT_DIR/lib/aws/ssm.sh"
 
 # Commands
+source "$ROOT_DIR/lib/commands/ssm_login.sh"
 source "$ROOT_DIR/lib/commands/ssm_connect.sh"
 source "$ROOT_DIR/lib/commands/ssm_list.sh"
 source "$ROOT_DIR/lib/commands/ssm_kill.sh"
 source "$ROOT_DIR/lib/commands/ssm_exec.sh"
+source "$ROOT_DIR/lib/commands/ssm_run.sh"
+source "$ROOT_DIR/lib/commands/ssm_creds.sh"
 source "$ROOT_DIR/lib/commands/ssm_update.sh"
 
 usage() {
@@ -39,8 +42,11 @@ Usage: ssm <command> [options]
 AWS Systems Manager (SSM) session management tool
 
 Commands:
+  login      Authenticate with AWS via Granted (assume)
   connect    Start SSM shell session or port forwarding to an instance
   exec       Run a shell command on one or more instances via SSM
+  run        Run a command or script against one or more AWS profiles
+  creds      Manage AWS credentials (store/use)
   list       List active SSM sessions on this host
   kill       Terminate active SSM sessions
   update     Update aws-ssm-tools to the latest version or a specific release
@@ -71,11 +77,20 @@ main() {
   shift || true
 
   case "$cmd" in
+    login)
+      ssm_login "$@"
+      ;;
     connect)
       ssm_connect "$@"
       ;;
     exec)
       ssm_exec "$@"
+      ;;
+    run)
+      ssm_run "$@"
+      ;;
+    creds)
+      ssm_creds "$@"
       ;;
     list)
       ssm_list "$@"

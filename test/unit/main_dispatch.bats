@@ -21,8 +21,11 @@ setup() {
   [ "$status" -eq 0 ]
   [[ "$output" =~ "Usage: ssm" ]]
   [[ "$output" =~ "Commands:" ]]
+  [[ "$output" =~ "login" ]]
   [[ "$output" =~ "connect" ]]
   [[ "$output" =~ "exec" ]]
+  [[ "$output" =~ "run" ]]
+  [[ "$output" =~ "creds" ]]
   [[ "$output" =~ "list" ]]
   [[ "$output" =~ "kill" ]]
 }
@@ -74,4 +77,26 @@ setup() {
   [ "$status" -eq 0 ]
   [[ "$output" =~ "Usage: ssm exec" ]]
   [[ "$output" =~ "Run a shell command via AWS SSM" ]]
+}
+
+@test "bin/ssm login --help works" {
+  run ./bin/ssm login --help
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "Usage: ssm login" ]]
+  [[ "$output" =~ "Authenticate with AWS via Granted" ]]
+}
+
+@test "bin/ssm run --help works" {
+  run ./bin/ssm run --help
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "Usage: ssm run" ]]
+  [[ "$output" =~ "Run a command or script" ]]
+}
+
+@test "bin/ssm creds shows usage" {
+  run ./bin/ssm creds
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "Usage: ssm creds" ]]
+  [[ "$output" =~ "store" ]]
+  [[ "$output" =~ "use" ]]
 }

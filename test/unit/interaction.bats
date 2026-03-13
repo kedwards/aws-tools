@@ -33,6 +33,6 @@ setup() {
 
   assert_failure
   assert_output --partial "No AWS credentials found"
-  assert_output --partial "Authenticate first with: assume"
+  assert_output --partial "Authenticate first with: ssm login"
 }
 

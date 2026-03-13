@@ -14,6 +14,45 @@ aws_auth_is_valid() {
      -n "${AWS_SESSION_TOKEN:-}" ]]
 }
 
+# Actively authenticate by calling `source assume`.
+# This loads credentials into the current shell, unlike aws_auth_assume()
+# which only validates existing credentials.
+guard_function_override aws_auth_login || aws_auth_login() {
+  local profile="${1:-${PROFILE:-}}"
+  local region="${2:-${REGION:-}}"
+
+  if [[ -z "$profile" ]]; then
+    log_error "Profile required for login"
+    return 1
+  fi
+
+  if ! command -v assume >/dev/null 2>&1; then
+    log_error "'assume' (Granted) not found in PATH"
+    log_error "Install: https://docs.commonfate.io/granted/getting-started"
+    return 1
+  fi
+
+  # Disable assume check for tests
+  if [[ "${AWS_AUTH_DISABLE_ASSUME:-0}" == "1" ]]; then
+    log_debug "Skipping assume (AWS_AUTH_DISABLE_ASSUME=1)"
+    return 0
+  fi
+
+  local assume_args=("$profile")
+  [[ -n "$region" ]] && assume_args+=("--region" "$region")
+
+  log_debug "Running: source assume ${assume_args[*]}"
+
+  # shellcheck disable=SC1090
+  if ! source assume "${assume_args[@]}"; then
+    log_error "Failed to assume profile '$profile'"
+    return 1
+  fi
+
+  log_success "Authenticated as profile '$profile'"
+  return 0
+}
+
 guard_function_override aws_auth_assume || aws_auth_assume() {
   local profile="${1:-${PROFILE:-}}"
   local region="${2:-${REGION:-}}"
@@ -23,8 +62,15 @@ guard_function_override aws_auth_assume || aws_auth_assume() {
 
   # Check if already authenticated
   if ! (aws_auth_is_valid || aws_auth_detected); then
+    # Auto-login if enabled
+    if [[ "${AWS_AUTH_AUTO_LOGIN:-0}" == "1" && -n "$profile" ]]; then
+      log_info "No credentials found, attempting login for '$profile'"
+      aws_auth_login "$profile" "$region" || return 1
+      return 0
+    fi
+
     log_error "No AWS credentials found"
-    log_error "Authenticate first with: assume <profile> -r <region>"
+    log_error "Authenticate first with: ssm login, or assume <profile> -r <region>"
     return 1
   fi
 
@@ -34,7 +80,7 @@ guard_function_override aws_auth_assume || aws_auth_assume() {
     if [[ -n "$current_profile" && "$current_profile" != "$profile" ]]; then
       log_error "Currently authenticated with profile '$current_profile'"
       log_error "Requested profile '$profile'"
-      log_error "Run 'assume $profile' to switch profiles"
+      log_error "Run 'ssm login -p $profile' to switch profiles"
       return 1
     fi
   fi
@@ -44,7 +90,7 @@ guard_function_override aws_auth_assume || aws_auth_assume() {
     if [[ -n "$current_region" && "$current_region" != "$region" ]]; then
       log_error "Currently authenticated with region '$current_region'"
       log_error "Requested region '$region'"
-      log_error "Run 'assume <profile> -r $region' to switch regions"
+      log_error "Run 'ssm login -p <profile> -r $region' to switch regions"
       return 1
     fi
   fi

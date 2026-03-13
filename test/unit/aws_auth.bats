@@ -196,3 +196,156 @@ teardown() {
 
   assert_success
 }
+
+# --- aws_auth_login tests ---
+
+@test "aws_auth_login fails when profile is empty" {
+  run aws_auth_login "" us-west-2
+
+  assert_failure
+  assert_output --partial "Profile required for login"
+}
+
+@test "aws_auth_login fails when assume not in PATH" {
+  # Override command to simulate assume not found
+  command() {
+    if [[ "$1" == "-v" && "$2" == "assume" ]]; then
+      return 1
+    fi
+    builtin command "$@"
+  }
+
+  run aws_auth_login testprofile us-west-2
+
+  assert_failure
+  assert_output --partial "'assume' (Granted) not found in PATH"
+}
+
+@test "aws_auth_login succeeds when AWS_AUTH_DISABLE_ASSUME is set" {
+  export AWS_AUTH_DISABLE_ASSUME=1
+
+  run aws_auth_login testprofile us-west-2
+
+  assert_success
+}
+
+@test "aws_auth_login calls source assume with profile" {
+  export AWS_AUTH_DISABLE_ASSUME=0
+  log_success() { echo "$*"; }
+
+  # Create a fake assume script on PATH (source needs a file, not a function)
+  local fake_bin="$(mktemp -d)"
+  cat > "$fake_bin/assume" <<'EOF'
+#!/usr/bin/env bash
+echo "ASSUME_CALLED: $*"
+EOF
+  chmod +x "$fake_bin/assume"
+  export PATH="$fake_bin:$PATH"
+
+  run aws_auth_login testprofile
+
+  assert_success
+  assert_output --partial "ASSUME_CALLED: testprofile"
+  assert_output --partial "Authenticated as profile 'testprofile'"
+
+  rm -rf "$fake_bin"
+}
+
+@test "aws_auth_login calls source assume with profile and region" {
+  export AWS_AUTH_DISABLE_ASSUME=0
+  log_success() { echo "$*"; }
+
+  local fake_bin="$(mktemp -d)"
+  cat > "$fake_bin/assume" <<'EOF'
+#!/usr/bin/env bash
+echo "ASSUME_CALLED: $*"
+EOF
+  chmod +x "$fake_bin/assume"
+  export PATH="$fake_bin:$PATH"
+
+  run aws_auth_login testprofile us-west-2
+
+  assert_success
+  assert_output --partial "ASSUME_CALLED: testprofile --region us-west-2"
+
+  rm -rf "$fake_bin"
+}
+
+@test "aws_auth_login fails when assume returns error" {
+  export AWS_AUTH_DISABLE_ASSUME=0
+
+  local fake_bin="$(mktemp -d)"
+  cat > "$fake_bin/assume" <<'EOF'
+#!/usr/bin/env bash
+return 1 2>/dev/null || exit 1
+EOF
+  chmod +x "$fake_bin/assume"
+  export PATH="$fake_bin:$PATH"
+
+  run aws_auth_login testprofile us-west-2
+
+  assert_failure
+  assert_output --partial "Failed to assume profile 'testprofile'"
+
+  rm -rf "$fake_bin"
+}
+
+# --- aws_auth_assume auto-login tests ---
+
+@test "aws_auth_assume auto-login calls aws_auth_login when enabled" {
+  export AWS_AUTH_AUTO_LOGIN=1
+  stub_sts_invalid
+
+  aws_auth_login() {
+    echo "AUTO_LOGIN: $1 $2"
+    return 0
+  }
+
+  run aws_auth_assume testprofile us-west-2
+
+  assert_success
+  assert_output --partial "AUTO_LOGIN: testprofile us-west-2"
+}
+
+@test "aws_auth_assume does not auto-login when disabled" {
+  export AWS_AUTH_AUTO_LOGIN=0
+  stub_sts_invalid
+
+  aws_auth_login() {
+    echo "SHOULD_NOT_RUN"
+    return 0
+  }
+
+  run aws_auth_assume testprofile us-west-2
+
+  assert_failure
+  refute_output --partial "SHOULD_NOT_RUN"
+}
+
+@test "aws_auth_assume auto-login fails when login fails" {
+  export AWS_AUTH_AUTO_LOGIN=1
+  stub_sts_invalid
+
+  aws_auth_login() {
+    return 1
+  }
+
+  run aws_auth_assume testprofile us-west-2
+
+  assert_failure
+}
+
+@test "aws_auth_assume auto-login skipped when no profile" {
+  export AWS_AUTH_AUTO_LOGIN=1
+  stub_sts_invalid
+
+  aws_auth_login() {
+    echo "SHOULD_NOT_RUN"
+    return 0
+  }
+
+  run aws_auth_assume "" ""
+
+  assert_failure
+  refute_output --partial "SHOULD_NOT_RUN"
+}
