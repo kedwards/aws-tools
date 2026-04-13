@@ -5,7 +5,12 @@ source "$LIB_CORE_DIR/interaction.sh"
 source "$LIB_CORE_DIR/test_guard.sh"
 
 aws_auth_detected() {
-  aws sts get-caller-identity >/dev/null 2>&1
+  local profile="${1:-${AWS_PROFILE:-}}"
+  if [[ -n "$profile" ]]; then
+    aws sts get-caller-identity --profile "$profile" >/dev/null 2>&1
+  else
+    aws sts get-caller-identity >/dev/null 2>&1
+  fi
 }
 
 aws_auth_is_valid() {
@@ -61,7 +66,7 @@ guard_function_override aws_auth_assume || aws_auth_assume() {
   [[ "${SHOW_HELP:-false}" == true ]] && return 0
 
   # Check if already authenticated
-  if ! (aws_auth_is_valid || aws_auth_detected); then
+  if ! (aws_auth_is_valid || aws_auth_detected "$profile"); then
     # Auto-login if profile is available
     if [[ -n "$profile" ]]; then
       log_info "No credentials found, attempting login for '$profile'"

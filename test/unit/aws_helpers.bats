@@ -319,3 +319,74 @@ EOF
   run choose_profile_and_region
   [ "$status" -eq 1 ]
 }
+
+@test "choose_profile_and_region prompts for region even when auto-detected" {
+  cat > "$HOME/.aws/config" <<EOF
+[profile test]
+region = us-east-1
+EOF
+
+  aws() {
+    if [[ "$1" == "configure" && "$2" == "get" ]]; then
+      echo "us-east-1"
+      return 0
+    fi
+    return 1
+  }
+  export -f aws
+
+  # Override menu_select_one to capture that it was called and what it received
+  menu_select_one() {
+    local prompt="$1"
+    local __var="$3"
+    shift 3
+    # Verify detected region is listed first
+    [[ "$1" == "us-east-1" ]] || return 1
+    printf -v "$__var" '%s' "$1"
+    return 0
+  }
+  export -f menu_select_one
+
+  # Use interactive mode (MENU_NON_INTERACTIVE not set)
+  unset MENU_NON_INTERACTIVE
+  PROFILE="test"
+  REGION=""
+
+  source ./lib/core/aws.sh
+
+  choose_profile_and_region
+  [ "$REGION" = "us-east-1" ]
+}
+
+@test "choose_profile_and_region skips region menu when -r flag used" {
+  cat > "$HOME/.aws/config" <<EOF
+[profile test]
+region = us-east-1
+EOF
+
+  aws() {
+    if [[ "$1" == "configure" && "$2" == "get" ]]; then
+      echo "us-east-1"
+      return 0
+    fi
+    return 1
+  }
+  export -f aws
+
+  local menu_called=false
+  menu_select_one() {
+    menu_called=true
+    return 0
+  }
+  export -f menu_select_one
+
+  unset MENU_NON_INTERACTIVE
+  PROFILE="test"
+  REGION="eu-west-1"  # simulates -r flag
+
+  source ./lib/core/aws.sh
+
+  choose_profile_and_region
+  [ "$AWS_REGION" = "eu-west-1" ]
+  [ "$menu_called" = false ]
+}
