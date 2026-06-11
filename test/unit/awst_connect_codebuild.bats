@@ -176,3 +176,4 @@ EOF
   assert_success
   assert_output --partial "Connecting to CodeBuild build: build-1"
 }
+

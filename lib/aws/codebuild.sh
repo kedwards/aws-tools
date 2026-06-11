@@ -10,10 +10,11 @@ guard_function_override aws_codebuild_list_builds || aws_codebuild_list_builds()
     return 1
   }
 
-  log_debug "Listing builds for CodeBuild project: $project_name"
+  log_debug "Listing active builds for CodeBuild project: $project_name"
 
   aws codebuild list-builds-for-project \
     --project-name "$project_name" \
+    --sort-order DESCENDING \
     --query 'ids' \
     --output json 2>/dev/null || {
     log_error "Failed to list builds for project: $project_name"
@@ -93,13 +94,15 @@ guard_function_override aws_codebuild_select_build || aws_codebuild_select_build
     return 1
   fi
 
-  # Get details for all builds (to show status and timestamps)
+  # Fetch first 10 builds to find ones with active debug sessions
+  local max_check=10
+  local -a check_ids=("${build_ids[@]:0:max_check}")
+
   local builds_detail_json
-  builds_detail_json=$(aws_codebuild_batch_get_builds "${build_ids[@]}") || return 1
+  builds_detail_json=$(aws_codebuild_batch_get_builds "${check_ids[@]}") || return 1
 
   # Extract builds with debug sessions enabled
   local -a debug_builds
-  local build_index=0
   while IFS= read -r build_json; do
     local build_id status phase
     build_id=$(echo "$build_json" | jq -r '.id')
@@ -112,7 +115,6 @@ guard_function_override aws_codebuild_select_build || aws_codebuild_select_build
     if [[ -n "$has_debug" ]]; then
       debug_builds+=("$build_id ($status - $phase)")
     fi
-    ((build_index++))
   done < <(echo "$builds_detail_json" | jq -c '.builds[]')
 
   if (( ${#debug_builds[@]} == 0 )); then
