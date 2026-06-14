@@ -4,7 +4,8 @@
 FROM debian:stable-slim
 
 ARG TASK_VERSION=3.39.2
-ARG TARGETARCH=amd64
+# Auto-populated by BuildKit; do not default (would mask multi-arch builds).
+ARG TARGETARCH
 
 ENV DEBIAN_FRONTEND=noninteractive \
     LANG=C.UTF-8 \

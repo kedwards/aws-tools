@@ -38,10 +38,16 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          # Keep the leading `v` so image tags (vX.Y.Z, vX.Y, vX) match the
+          # `v`-prefixed values that install.sh / update.sh resolve from the
+          # GitHub releases API. `latest` is set manually so metadata-action
+          # doesn't also emit it as a duplicate via its flavor default.
+          flavor: |
+            latest=false
           tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
+            type=semver,pattern=v{{version}}
+            type=semver,pattern=v{{major}}.{{minor}}
+            type=semver,pattern=v{{major}}
             type=raw,value=latest
           labels: |
             org.opencontainers.image.title=aws-tools
