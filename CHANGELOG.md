@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.5.0] - 2026-06-17
+
+### Changed
+- Split shipped defaults from user customizations for saved commands, run commands, and connection configs.
+- Load configuration as base then user layers, while keeping explicit environment-variable overrides exclusive.
+- Simplified `awst config` output and added a `--verbose` flag for fuller config inspection.
+- Removed default-config copying from install/update flows and fixed installer/updater home-directory resolution.
+
 ## [1.6.0] - 2026-03-13
 
 ### Added
@@ -125,7 +133,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - macOS support expected but not extensively tested
 - Requires bash 4.0 or later
 
-[Unreleased]: https://github.com/kedwards/aws-tools/compare/v1.6.0...HEAD
+[Unreleased]: https://github.com/kedwards/aws-tools/compare/v2.5.0...HEAD
+[2.5.0]: https://github.com/kedwards/aws-tools/compare/v2.4.1...v2.5.0
 [1.6.0]: https://github.com/kedwards/aws-tools/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/kedwards/aws-tools/compare/v1.0.0...v1.5.0
 [1.0.0]: https://github.com/kedwards/aws-tools/releases/tag/v1.0.0
