@@ -114,6 +114,12 @@ When you create a release, the following happens automatically:
    - Auto-generates release notes from commits since last tag
    - Includes installation instructions in the release
 
+6. **Image Publishing** (automatic via CI)
+   - The release workflow (`.github/workflows/release.yml`) builds and pushes the runtime image to GHCR
+   - Tags: `vX.Y.Z`, `vX.Y`, `vX`, `latest`
+   - Multi-arch: `linux/amd64` and `linux/arm64`
+   - Verify: `docker pull ghcr.io/kedwards/aws-tools:vX.Y.Z`
+
 ## Installing Specific Versions
 
 ### For End Users
@@ -163,6 +169,7 @@ Before creating a release, ensure:
 - [ ] No uncommitted changes in working directory
 - [ ] You're on the `main` branch
 - [ ] You have GitHub CLI authenticated (`gh auth status`)
+- [ ] Image is available on GHCR after the release workflow completes (`docker pull ghcr.io/kedwards/aws-tools:vX.Y.Z`)
 
 ## Hotfix Releases
 

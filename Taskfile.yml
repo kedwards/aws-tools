@@ -130,3 +130,18 @@ tasks:
       - lib/**/*
       - examples/commands/**/*
     method: checksum
+
+  docker:push:runtime:
+    desc: Build and push the runtime image to GHCR (manual fallback)
+    vars:
+      GHCR_IMAGE: ghcr.io/kedwards/aws-tools
+    cmds:
+      - >-
+        {{.DOCKER}} buildx build
+        --target runtime
+        -f containers/Dockerfile
+        -t {{.GHCR_IMAGE}}:v$(cat VERSION)
+        -t {{.GHCR_IMAGE}}:latest
+        --platform linux/amd64,linux/arm64
+        --push
+        .
