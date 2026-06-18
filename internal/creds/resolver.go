@@ -29,9 +29,8 @@ func Resolve(ctx context.Context, profile string, p Provider) (Credentials, erro
 }
 
 // NewSDKProvider builds a Provider backed by the AWS SDK default credential
-// chain for the named profile. Untested at the unit level; covered manually
-// (see plan.md verification step 4).
-func NewSDKProvider(ctx context.Context, profile, region string) (Provider, error) {
+// chain for the named profile and returns the effective region.
+func NewSDKProvider(ctx context.Context, profile, region string) (Provider, string, error) {
 	opts := []func(*config.LoadOptions) error{
 		config.WithSharedConfigProfile(profile),
 	}
@@ -40,7 +39,7 @@ func NewSDKProvider(ctx context.Context, profile, region string) (Provider, erro
 	}
 	cfg, err := config.LoadDefaultConfig(ctx, opts...)
 	if err != nil {
-		return nil, fmt.Errorf("load aws config for profile %q: %w", profile, err)
+		return nil, "", fmt.Errorf("load aws config for profile %q: %w", profile, err)
 	}
-	return cfg.Credentials, nil
+	return cfg.Credentials, cfg.Region, nil
 }

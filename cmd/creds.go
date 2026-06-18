@@ -8,13 +8,13 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/withreach/aws-tools/internal/creds"
-	"github.com/withreach/aws-tools/internal/paths"
+	"github.com/kedwards/aws-tools/internal/creds"
+	"github.com/kedwards/aws-tools/internal/paths"
 )
 
 type credsDeps struct {
 	store           *creds.Store
-	providerFactory func(ctx context.Context, profile, region string) (creds.Provider, error)
+	providerFactory func(ctx context.Context, profile, region string) (creds.Provider, string, error)
 	now             func() time.Time
 }
 
@@ -48,7 +48,7 @@ func newCredsStoreCmd(d credsDeps) *cobra.Command {
 		Use:   "store <profile>",
 		Short: "Resolve credentials for <profile> and persist to disk",
 		Long: `Resolve credentials for <profile> via the AWS SDK default credential
-chain and persist them to disk. Prints shell `+"`export`"+` statements
+chain and persist them to disk. Prints shell ` + "`export`" + ` statements
 intended for eval:
 
   eval "$(awst creds store dev)"`,
@@ -60,7 +60,7 @@ intended for eval:
 				ctx = context.Background()
 			}
 
-			p, err := d.providerFactory(ctx, profile, region)
+			p, resolvedRegion, err := d.providerFactory(ctx, profile, region)
 			if err != nil {
 				return err
 			}
@@ -68,7 +68,7 @@ intended for eval:
 			if err != nil {
 				return err
 			}
-			resolved.Region = region
+			resolved.Region = resolvedRegion
 			if err := d.store.Save(profile, resolved); err != nil {
 				return err
 			}

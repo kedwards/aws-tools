@@ -21,7 +21,7 @@ sourcing, no `assume` shell-out.
 ## Install
 
 ```sh
-go install github.com/withreach/aws-tools@latest
+go install github.com/kedwards/aws-tools@latest
 ```
 
 Or build from source:

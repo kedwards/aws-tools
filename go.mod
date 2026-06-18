@@ -1,4 +1,4 @@
-module github.com/withreach/aws-tools
+module github.com/kedwards/aws-tools
 
 go 1.26.3
 

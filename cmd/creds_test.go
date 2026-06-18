@@ -12,7 +12,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 
-	"github.com/withreach/aws-tools/internal/creds"
+	"github.com/kedwards/aws-tools/internal/creds"
 )
 
 func runCmd(t *testing.T, d credsDeps, args ...string) (stdout, stderr string, err error) {
@@ -33,14 +33,14 @@ func testDeps(t *testing.T) credsDeps {
 	dir := filepath.Join(t.TempDir(), "creds")
 	return credsDeps{
 		store: creds.NewStore(dir),
-		providerFactory: func(ctx context.Context, profile, region string) (creds.Provider, error) {
+		providerFactory: func(ctx context.Context, profile, region string) (creds.Provider, string, error) {
 			return stubProvider{
 				creds: aws.Credentials{
 					AccessKeyID:     "AKIA-from-stub",
 					SecretAccessKey: "secret",
 					SessionToken:    "token",
 				},
-			}, nil
+			}, "us-east-1", nil
 		},
 		now: func() time.Time { return time.Date(2026, 6, 17, 12, 0, 0, 0, time.UTC) },
 	}
@@ -70,6 +70,14 @@ func TestCredsStore_HelpFlag(t *testing.T) {
 	require.Contains(t, out, "creds store <profile>")
 }
 
+func TestCredsUse_HelpFlag(t *testing.T) {
+	d := testDeps(t)
+	out, _, err := runCmd(t, d, "creds", "use", "-h")
+	require.NoError(t, err)
+	require.Contains(t, out, "Usage:")
+	require.Contains(t, out, "creds use <profile>")
+}
+
 func TestCredsClear_UnknownProfile(t *testing.T) {
 	d := testDeps(t)
 	_, _, err := runCmd(t, d, "creds", "clear", "nope")
@@ -82,19 +90,21 @@ func TestCredsStore_WritesAndPrintsExports(t *testing.T) {
 	out, _, err := runCmd(t, d, "creds", "store", "dev")
 	require.NoError(t, err)
 	require.Contains(t, out, `export AWS_ACCESS_KEY_ID="AKIA-from-stub"`)
+	require.Contains(t, out, `export AWS_REGION="us-east-1"`)
 	require.Contains(t, out, `export AWS_PROFILE="dev"`)
 
 	// Round-trip: stored file should be loadable.
 	loaded, err := d.store.Load("dev")
 	require.NoError(t, err)
 	require.Equal(t, "AKIA-from-stub", loaded.AccessKeyID)
+	require.Equal(t, "us-east-1", loaded.Region)
 }
 
 func TestCredsStore_ProviderError(t *testing.T) {
 	sentinel := errors.New("SSO token expired")
 	d := testDeps(t)
-	d.providerFactory = func(ctx context.Context, profile, region string) (creds.Provider, error) {
-		return stubProvider{err: sentinel}, nil
+	d.providerFactory = func(ctx context.Context, profile, region string) (creds.Provider, string, error) {
+		return stubProvider{err: sentinel}, "", nil
 	}
 
 	_, _, err := runCmd(t, d, "creds", "store", "dev")
