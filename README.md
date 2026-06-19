@@ -4,9 +4,11 @@ CLI for AWS shell + session work. A Go rewrite of the original Bash
 toolkit (see branch `main`); the port lives on branch `go-port` while
 commands are migrated one vertical slice at a time.
 
-**Status:** slices 1–6 — `awst creds` + `awst login` + `awst connect`
-+ `awst list`/`kill` + `awst exec` + `awst run`. Other commands
-(`config`, `update`) still live in the bash toolkit on `main`.
+**Status:** slices 1–8 — `awst creds` + `awst login` + `awst connect`
++ `awst list`/`kill` + `awst exec` + `awst run` + `awst config`.
+`awst update` is intentionally not ported: a single static binary
+released via GoReleaser doesn't need the bash tarball+rsync updater —
+use your package manager, `go install`, or the GitHub release assets.
 
 ## Why a Go port
 
@@ -225,6 +227,22 @@ Executable files (`+x`) are exec'd directly:
 - **with a filter** → iterated per profile, with AWS env vars set
 - **without a filter** → run once, no profile loop (the script handles
   its own iteration)
+
+### `awst config`
+
+Print the paths and AWS settings awst resolves at runtime — where creds
+and SSO tokens live, where `awst run` looks for commands, and the
+profile/region the SDK chain will pick up. Paths shown `(missing)` just
+haven't been written yet.
+
+```sh
+awst config
+```
+
+Unlike the bash version this does **not** enumerate logging/menu/cache
+env vars or probe for `aws`/`assume`/`rsync`/`fzf` — the Go binary
+carries none of those. It reports only the surface the port actually
+uses.
 
 ## Development
 

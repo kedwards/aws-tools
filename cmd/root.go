@@ -25,6 +25,7 @@ func NewRootCmd() *cobra.Command {
 	sd := defaultSessionsDeps()
 	root.AddCommand(newListCmd(sd))
 	root.AddCommand(newKillCmd(sd))
+	root.AddCommand(newConfigCmd())
 	return root
 }
 
