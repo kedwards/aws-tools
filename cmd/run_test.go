@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -155,6 +156,9 @@ func TestRun_InlineCommand(t *testing.T) {
 }
 
 func TestRun_ExecutableNoFilter_RunsOnceWithoutIteration(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("executable-bit detection is unix-only (windows support is the P2 run-semantics gap)")
+	}
 	d := t.TempDir()
 	scriptPath := writeFileT(t, d, "self-iter", "#!/bin/sh\necho I handle iteration myself\n", true)
 	child := &childRecorder{}
@@ -168,6 +172,9 @@ func TestRun_ExecutableNoFilter_RunsOnceWithoutIteration(t *testing.T) {
 }
 
 func TestRun_ExecutableWithFilter_IteratesPerProfile(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("executable-bit detection is unix-only (windows support is the P2 run-semantics gap)")
+	}
 	d := t.TempDir()
 	scriptPath := writeFileT(t, d, "per-profile", "#!/bin/sh\necho hi\n", true)
 	child := &childRecorder{}
