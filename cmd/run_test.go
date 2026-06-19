@@ -105,7 +105,10 @@ func TestRun_ListsCommandsWhenNoArgs(t *testing.T) {
 	require.Contains(t, out, "vpc-cidrs")
 	require.Contains(t, out, "Show VPC CIDRs")
 	require.Contains(t, out, "instances")
-	require.Contains(t, out, "*", "executables should be marked")
+	if runtime.GOOS != "windows" {
+		// The "*" marks executables (Perm()&0o111); always 0 on windows.
+		require.Contains(t, out, "*", "executables should be marked")
+	}
 	require.Empty(t, child.calls, "list mode should not invoke child")
 }
 

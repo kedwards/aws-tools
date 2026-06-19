@@ -3,26 +3,35 @@
 package sessions
 
 import (
+	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
 
-// These exercise the real shell32 CommandLineToArgvW syscall — runs only on
-// the windows CI runner, where it actually matters.
+// Exercises the real shell32 CommandLineToArgvW syscall — runs only on the
+// windows CI runner, where it actually matters.
 
-func TestCommandLineToArgv_PluginShape(t *testing.T) {
-	// The plugin's argv as awst/the AWS CLI pass it: space-free JSON blobs.
-	got := commandLineToArgv(`C:\bin\session-manager-plugin.exe {"SessionId":"s"} us-east-1 StartSession dev {"Target":"i-1"} https://ep`)
-	require.Equal(t, []string{
+// TestCommandLineToArgv_RoundTrip mirrors how a command line is actually
+// formed: os/exec escapes each arg with syscall.EscapeArg, and the running
+// process's WMI CommandLine is that escaped string. commandLineToArgv must
+// reverse it back to the original argv — including JSON args full of quotes.
+func TestCommandLineToArgv_RoundTrip(t *testing.T) {
+	args := []string{
 		`C:\bin\session-manager-plugin.exe`,
-		`{"SessionId":"s"}`,
+		`{"SessionId":"s","StreamUrl":"wss://x","TokenValue":"t"}`,
 		"us-east-1",
 		"StartSession",
 		"dev",
 		`{"Target":"i-1"}`,
-		"https://ep",
-	}, got)
+		"https://ssm.us-east-1.amazonaws.com",
+	}
+	escaped := make([]string, len(args))
+	for i, a := range args {
+		escaped[i] = syscall.EscapeArg(a)
+	}
+	require.Equal(t, args, commandLineToArgv(strings.Join(escaped, " ")))
 }
 
 func TestCommandLineToArgv_Quoting(t *testing.T) {
