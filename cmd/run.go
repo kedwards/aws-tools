@@ -23,6 +23,7 @@ type runDeps struct {
 	listProfiles func() ([]string, error)
 	runChild     func(args []string, env []string, stdout, stderr io.Writer) (int, error)
 	getenv       func(string) string
+	shell        func() (string, error) // POSIX shell for snippets/inline
 }
 
 func defaultRunDeps() runDeps {
@@ -31,6 +32,7 @@ func defaultRunDeps() runDeps {
 		resolveCreds: defaultResolveCreds,
 		listProfiles: defaultListProfiles,
 		runChild:     defaultRunChild,
+		shell:        runner.POSIXShell,
 		getenv: func(k string) string {
 			v := os.Getenv(k)
 			if v != "" {
@@ -141,6 +143,16 @@ Examples:
 				snippet = body
 			}
 
+			// Snippets and inline commands are POSIX shell; resolve sh/bash
+			// once up front (on Windows this finds Git Bash / WSL or errors).
+			shell := ""
+			if !isExecutable {
+				shell, err = d.shell()
+				if err != nil {
+					return err
+				}
+			}
+
 			targets, err := buildTargets(filter, d.listProfiles)
 			if err != nil {
 				return err
@@ -175,7 +187,7 @@ Examples:
 				if isExecutable {
 					childArgs = []string{scriptPath}
 				} else {
-					childArgs = runner.ShellCommandArgs(runner.Substitute(snippet, t.Profile, t.Region))
+					childArgs = []string{shell, "-c", runner.Substitute(snippet, t.Profile, t.Region)}
 				}
 				if _, err := d.runChild(childArgs, env, cmd.OutOrStdout(), cmd.ErrOrStderr()); err != nil {
 					fmt.Fprintf(cmd.ErrOrStderr(),
