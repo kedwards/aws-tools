@@ -31,6 +31,41 @@ type OIDCClient interface {
 // print the prompt and optionally open a browser.
 type Prompter func(verificationURIComplete, userCode string)
 
+// EnsureToken returns a valid SSO token for sess: it reuses the cached token
+// when one exists and has not expired, otherwise it builds an OIDC client (via
+// newOIDC, called only when a login is actually needed), runs the device flow,
+// caches the result, and returns it. The bool reports whether the returned
+// token came from cache.
+func EnsureToken(
+	ctx context.Context,
+	cache *Cache,
+	sess SSOSession,
+	newOIDC func() (OIDCClient, error),
+	prompt Prompter,
+	sleep func(time.Duration),
+	now func() time.Time,
+) (Token, bool, error) {
+	if now == nil {
+		now = time.Now
+	}
+	if tok, err := cache.Load(sess.Name); err == nil && tok.AccessToken != "" && tok.ExpiresAt.After(now()) {
+		return tok, true, nil
+	}
+
+	oidc, err := newOIDC()
+	if err != nil {
+		return Token{}, false, err
+	}
+	tok, err := Login(ctx, oidc, sess, prompt, sleep, now)
+	if err != nil {
+		return Token{}, false, err
+	}
+	if err := cache.Save(sess.Name, tok); err != nil {
+		return Token{}, false, err
+	}
+	return tok, false, nil
+}
+
 // Login runs the SSO OIDC device-authorization flow against oidc. sleep and
 // now are injected so polling can be tested without real waits.
 func Login(

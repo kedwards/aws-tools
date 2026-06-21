@@ -97,20 +97,6 @@ Examples:
 				return err
 			}
 
-			// Skip the SSO device flow if a still-valid token is already cached.
-			if tok, err := d.cache.Load(sess.Name); err == nil && tok.AccessToken != "" && tok.ExpiresAt.After(d.now()) {
-				fmt.Fprintf(cmd.ErrOrStderr(),
-					"Already logged in via sso_session %q (token valid until %s).\n",
-					sess.Name, tok.ExpiresAt.Local().Format(time.RFC3339),
-				)
-				return nil
-			}
-
-			oidc, err := d.oidcFactory(ctx, sess.Region)
-			if err != nil {
-				return err
-			}
-
 			prompt := func(uri, code string) {
 				fmt.Fprintf(cmd.ErrOrStderr(),
 					"Open this URL in your browser to authorize awst:\n  %s\nUser code: %s\n",
@@ -121,13 +107,21 @@ Examples:
 				}
 			}
 
-			tok, err := sso.Login(ctx, oidc, sess, prompt, d.sleep, d.now)
+			// Reuses a still-valid cached token; only runs the device flow when
+			// the token is missing or expired.
+			tok, cached, err := sso.EnsureToken(ctx, d.cache, sess,
+				func() (sso.OIDCClient, error) { return d.oidcFactory(ctx, sess.Region) },
+				prompt, d.sleep, d.now)
 			if err != nil {
 				return err
 			}
 
-			if err := d.cache.Save(sess.Name, tok); err != nil {
-				return err
+			if cached {
+				fmt.Fprintf(cmd.ErrOrStderr(),
+					"Already logged in via sso_session %q (token valid until %s).\n",
+					sess.Name, tok.ExpiresAt.Local().Format(time.RFC3339),
+				)
+				return nil
 			}
 			fmt.Fprintf(cmd.ErrOrStderr(),
 				"Logged in via sso_session %q. Token cached at %s\n",

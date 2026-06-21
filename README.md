@@ -9,7 +9,7 @@ profiles. Cross-platform (Linux, macOS, Windows).
 > tagged [`bash-final`](https://github.com/kedwards/awst/tree/bash-final)
 > (and the `v2.x` release tags). All current development is on `main`.
 
-**Commands:** `creds` · `login` · `connect` (shell + port-forward) ·
+**Commands:** `creds` · `login` · `sso` · `connect` (shell + port-forward) ·
 `exec` · `run` · `list`/`kill` · `config`.
 `awst update` is intentionally not ported: a single static binary
 released via GoReleaser doesn't need the bash tarball+rsync updater —
@@ -157,6 +157,31 @@ sso_region    = us-east-1
 
 Legacy SSO profiles (`sso_start_url` on the profile itself, no
 `sso_session`) are rejected — migrate them to the `sso_session` form.
+
+### `awst sso configure`
+
+Bootstraps `~/.aws/config` from an SSO start URL: logs in once (reusing a
+valid cached token if present) and writes an `[sso-session]` block plus a
+`[profile …]` block for **every** account/role the SSO session grants. The
+existing config is backed up to `~/.aws/config.bak` and all unrelated profiles
+are left untouched; re-running upserts the same profiles.
+
+```sh
+awst sso configure --start-url https://my-org.awsapps.com/start --sso-region us-east-1
+awst sso configure --start-url https://my-org.awsapps.com/start --sso-region us-east-1 --naming accountid-role
+```
+
+Profile names follow `--naming` (default `account-role`):
+
+| `--naming`        | Example profile                |
+| ----------------- | ------------------------------ |
+| `account-role`    | `acme-prod-adminaccess`        |
+| `accountid-role`  | `111122223333-adminaccess`     |
+| `account`         | `acme-prod` (role suffixed only when an account has multiple roles) |
+
+The `[sso-session]` name defaults to the first label of the start URL host
+(`my-org` above); override with `--session`. Each profile's `region` defaults
+to `--sso-region` unless `--region` is given.
 
 ### `awst connect`
 
