@@ -18,6 +18,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/kedwards/awst/v3/internal/connect"
+	"github.com/kedwards/awst/v3/internal/tui"
 )
 
 type stubSSM struct {
@@ -84,6 +85,9 @@ func connectTestDeps(ssm *stubSSM, ec2c *stubEC2, runner connect.PluginRunner, p
 		},
 		runner:     runner,
 		lookPlugin: func() error { return pluginErr },
+		// Default to non-interactive so multi-match falls back to the printed
+		// list + error; terminal tests override isTerminal/selectInstance.
+		isTerminal: func() bool { return false },
 	}
 }
 
@@ -140,6 +144,42 @@ func TestConnect_AmbiguousMatch_ListsAndExits(t *testing.T) {
 	require.Contains(t, err.Error(), "ambiguous")
 	require.Contains(t, out, "web-1")
 	require.Contains(t, out, "web-2")
+}
+
+func TestConnect_AmbiguousMatch_Terminal_PicksAndConnects(t *testing.T) {
+	ssmStub := &stubSSM{
+		infos:    []ssmtypes.InstanceInformation{ssmInfo("i-aaa"), ssmInfo("i-bbb")},
+		startOut: startOut(),
+	}
+	ec2Stub := &stubEC2{instances: []ec2types.Instance{ec2Inst("i-aaa", "web-1"), ec2Inst("i-bbb", "web-2")}}
+	runner := &captureRunner{}
+	d := connectTestDeps(ssmStub, ec2Stub, runner, nil)
+	d.isTerminal = func() bool { return true }
+	var offered []string
+	d.selectInstance = func(items []tui.InstanceItem) (string, error) {
+		for _, it := range items {
+			offered = append(offered, it.ID)
+		}
+		return "i-bbb", nil // user picks the second match
+	}
+
+	_, _, err := runConnect(t, d, "connect", "web")
+	require.NoError(t, err)
+	require.ElementsMatch(t, []string{"i-aaa", "i-bbb"}, offered, "picker should be offered both matches")
+	require.Equal(t, "i-bbb", aws.ToString(ssmStub.startCall.Target), "connects to the chosen instance")
+}
+
+func TestConnect_AmbiguousMatch_Terminal_AbortIsCleanNoOp(t *testing.T) {
+	ssmStub := &stubSSM{infos: []ssmtypes.InstanceInformation{ssmInfo("i-aaa"), ssmInfo("i-bbb")}}
+	ec2Stub := &stubEC2{instances: []ec2types.Instance{ec2Inst("i-aaa", "web-1"), ec2Inst("i-bbb", "web-2")}}
+	runner := &captureRunner{}
+	d := connectTestDeps(ssmStub, ec2Stub, runner, nil)
+	d.isTerminal = func() bool { return true }
+	d.selectInstance = func([]tui.InstanceItem) (string, error) { return "", tui.ErrAborted }
+
+	_, _, err := runConnect(t, d, "connect", "web")
+	require.NoError(t, err, "aborting the picker is a clean no-op")
+	require.Nil(t, ssmStub.startCall, "no session started when the picker is aborted")
 }
 
 func TestConnect_ExactID_StartsSession(t *testing.T) {

@@ -31,6 +31,14 @@ type ProfileItem struct {
 }
 
 func (i ProfileItem) FilterValue() string { return i.Profile }
+func (i ProfileItem) choiceValue() string { return i.Profile }
+
+// selectable is any list row that knows the value to return when chosen,
+// letting the shared model handle Enter without caring about the item type.
+type selectable interface {
+	list.Item
+	choiceValue() string
+}
 
 // itemDelegate renders each profile on a single line with a ">" cursor —
 // the compact style used by tools like `assume`, rather than the tall
@@ -86,8 +94,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.aborted = true
 				return m, tea.Quit
 			case "enter":
-				if it, ok := m.list.SelectedItem().(ProfileItem); ok {
-					m.choice = it.Profile
+				if it, ok := m.list.SelectedItem().(selectable); ok {
+					m.choice = it.choiceValue()
 				}
 				return m, tea.Quit
 			}
@@ -109,6 +117,74 @@ func SelectProfile(items []ProfileItem) (string, error) {
 	}
 	l := list.New(rows, itemDelegate{}, 0, 0)
 	l.Title = "Select a profile to log in"
+	l.SetShowStatusBar(false)
+	l.Styles.Title = titleStyle
+
+	res, err := tea.NewProgram(model{list: l}).Run()
+	if err != nil {
+		return "", err
+	}
+	fm := res.(model)
+	if fm.aborted || fm.choice == "" {
+		return "", ErrAborted
+	}
+	return fm.choice, nil
+}
+
+// InstanceItem is one selectable SSM-managed instance row.
+type InstanceItem struct {
+	ID    string
+	Name  string
+	State string
+	Ping  string
+}
+
+func (i InstanceItem) FilterValue() string { return i.Name }
+func (i InstanceItem) choiceValue() string { return i.ID }
+
+// instanceDelegate renders an instance on a single line with a ">" cursor:
+// the Name, then dimmed id · state · ping. Column widths are precomputed
+// across all rows (nameW/idW/stateW) so the fields line up vertically.
+type instanceDelegate struct{ nameW, idW, stateW int }
+
+func (instanceDelegate) Height() int                             { return 1 }
+func (instanceDelegate) Spacing() int                            { return 0 }
+func (instanceDelegate) Update(_ tea.Msg, _ *list.Model) tea.Cmd { return nil }
+func (d instanceDelegate) Render(w io.Writer, m list.Model, index int, item list.Item) {
+	it, ok := item.(InstanceItem)
+	if !ok {
+		return
+	}
+	name := it.Name
+	if name == "" {
+		name = "-"
+	}
+	name = fmt.Sprintf("%-*s", d.nameW, name) // pad to column width before styling
+	meta := "  " + dimStyle.Render(fmt.Sprintf("%-*s · %-*s · %s", d.idW, it.ID, d.stateW, it.State, it.Ping))
+	if index == m.Index() {
+		fmt.Fprint(w, "> "+selectedStyle.Render(name)+meta)
+		return
+	}
+	fmt.Fprint(w, "  "+name+meta)
+}
+
+// SelectInstance shows an arrow-key list of instances and returns the chosen
+// instance ID. It returns ErrAborted if the user quits without selecting.
+func SelectInstance(items []InstanceItem) (string, error) {
+	rows := make([]list.Item, len(items))
+	var nameW, idW, stateW int
+	for i, it := range items {
+		rows[i] = it
+		name := it.Name
+		if name == "" {
+			name = "-"
+		}
+		nameW = max(nameW, len(name))
+		idW = max(idW, len(it.ID))
+		stateW = max(stateW, len(it.State))
+	}
+	l := list.New(rows, instanceDelegate{nameW: nameW, idW: idW, stateW: stateW}, 0, 0)
+	l.Title = "Select an instance to connect to"
 	l.SetShowStatusBar(false)
 	l.Styles.Title = titleStyle
 

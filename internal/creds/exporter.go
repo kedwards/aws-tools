@@ -43,7 +43,10 @@ func FormatExports(profile string, c Credentials, shell Shell) string {
 		{"AWS_SESSION_TOKEN", c.SessionToken},
 	}
 	if c.Region != "" {
+		// Export both: AWS_REGION (SDK v2 / CLI v2 preferred) and
+		// AWS_DEFAULT_REGION (older tools / boto / CLI v1).
 		vars = append(vars, [2]string{"AWS_REGION", c.Region})
+		vars = append(vars, [2]string{"AWS_DEFAULT_REGION", c.Region})
 	}
 	vars = append(vars, [2]string{"AWS_PROFILE", profile})
 

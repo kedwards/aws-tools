@@ -14,11 +14,13 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
+	"github.com/charmbracelet/x/term"
 	"github.com/spf13/cobra"
 
 	"github.com/kedwards/awst/v3/internal/connect"
 	"github.com/kedwards/awst/v3/internal/paths"
 	"github.com/kedwards/awst/v3/internal/ssmexec"
+	"github.com/kedwards/awst/v3/internal/tui"
 )
 
 type ssmClients struct {
@@ -31,10 +33,12 @@ type ssmClients struct {
 }
 
 type connectDeps struct {
-	clients    func(ctx context.Context, profile, region string) (*ssmClients, error)
-	runner     connect.PluginRunner
-	lookPlugin func() error
-	connFile   string // default connections file; -f overrides at runtime
+	clients        func(ctx context.Context, profile, region string) (*ssmClients, error)
+	runner         connect.PluginRunner
+	lookPlugin     func() error
+	connFile       string // default connections file; -f overrides at runtime
+	selectInstance func(items []tui.InstanceItem) (string, error)
+	isTerminal     func() bool
 }
 
 var awsProfileEnvMu sync.Mutex
@@ -70,6 +74,8 @@ func defaultConnectDeps() connectDeps {
 			_, err := exec.LookPath(pluginBin)
 			return err
 		},
+		selectInstance: tui.SelectInstance,
+		isTerminal:     func() bool { return term.IsTerminal(os.Stdin.Fd()) },
 	}
 }
 
@@ -227,6 +233,7 @@ Examples:
 
 			forwarding := forwardSpec != "" || conn != nil
 
+			var inst connect.Instance
 			switch {
 			case len(matches) == 0 && filter == "":
 				printInstances(cmd.OutOrStdout(), list)
@@ -234,12 +241,23 @@ Examples:
 			case len(matches) == 0:
 				printInstances(cmd.OutOrStdout(), list)
 				return fmt.Errorf("no instance matched %q", filter)
-			case len(matches) > 1:
-				printInstances(cmd.OutOrStdout(), matches)
-				return fmt.Errorf("ambiguous: %d instances matched %q (refine the pattern or pass an i-… id)", len(matches), filter)
+			case len(matches) == 1:
+				inst = matches[0]
+			default: // 2+ candidates — pick interactively, or error in a pipe/CI
+				if !d.isTerminal() {
+					printInstances(cmd.OutOrStdout(), matches)
+					return fmt.Errorf("ambiguous: %d instances matched %q (refine the pattern, pass an i-… id, or run interactively)", len(matches), filter)
+				}
+				id, err := d.selectInstance(toInstanceItems(matches))
+				if err != nil {
+					if errors.Is(err, tui.ErrAborted) {
+						return nil // user quit the picker; nothing to do
+					}
+					return err
+				}
+				inst = instByID(matches, id)
 			}
 
-			inst := matches[0]
 			endpoint := connect.SSMEndpoint(clients.Region)
 
 			if forwarding {
@@ -300,6 +318,25 @@ func runForwards(ctx context.Context, clients *ssmClients, runner connect.Plugin
 	}
 	wg.Wait()
 	return errors.Join(errs...)
+}
+
+func toInstanceItems(list []connect.Instance) []tui.InstanceItem {
+	items := make([]tui.InstanceItem, len(list))
+	for i, in := range list {
+		items[i] = tui.InstanceItem{ID: in.ID, Name: in.Name, State: in.State, Ping: in.Ping}
+	}
+	return items
+}
+
+// instByID returns the instance with the given ID, or a zero Instance if the
+// id isn't in the list (it always is — it came from the same slice).
+func instByID(list []connect.Instance, id string) connect.Instance {
+	for _, in := range list {
+		if in.ID == id {
+			return in
+		}
+	}
+	return connect.Instance{}
 }
 
 func printInstances(w io.Writer, list []connect.Instance) {

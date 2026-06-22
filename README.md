@@ -57,6 +57,7 @@ Requires Go 1.26+ to build from source.
 
 | Command | Linux | macOS | Windows | Notes |
 |---|:---:|:---:|:---:|---|
+| `shell init` | ✅ | ✅ | ✅ | POSIX (bash/zsh) by default; `--powershell` for PowerShell |
 | `creds` | ✅ | ✅ | ✅ | `--shell powershell` for PowerShell output (`\| iex`) |
 | `login` | ✅ | ✅ | ✅ | browser-open works on all three (`--no-browser` to skip) |
 | `connect` (shell + `--forward`) | ✅ | ✅ | ✅ | needs `session-manager-plugin` on `PATH` |
@@ -66,6 +67,36 @@ Requires Go 1.26+ to build from source.
 | `list` / `kill` | ✅ | ✅ | ✅ | Linux via `/proc`, macOS via `ps`, Windows via CIM |
 
 ✅ supported · ⚠️ works with a prerequisite · ❌ not yet implemented
+
+### Shell setup — `awst <profile>`
+
+Install the shell wrapper once so a bare `awst <profile>` logs in and sets the
+AWS credential env vars (`AWS_PROFILE`, `AWS_ACCESS_KEY_ID`, …) **in the current
+shell** — the same one-word UX as Granted's `assume <profile>`. A process can't
+mutate its parent shell's environment, so this is a shell function that evals
+the binary's output; add it to your startup file:
+
+```sh
+# bash / zsh — ~/.bashrc or ~/.zshrc
+eval "$(awst shell init)"
+```
+
+```powershell
+# PowerShell — $PROFILE
+awst shell init --powershell | Out-String | Invoke-Expression
+```
+
+Then, in a new shell:
+
+```sh
+awst rch-platform-dev      # login (device flow if needed) + export creds here
+aws sts get-caller-identity # works with no --profile
+awst rch-platform-prod     # switch accounts in the same shell
+```
+
+All other subcommands (`creds`, `connect`, `exec`, `run`, `list`, `kill`,
+`config`, `sso`) pass straight through the wrapper unchanged. Without the
+wrapper installed, the raw equivalent is `eval "$(awst login --export <profile>)"`.
 
 ### `awst creds`
 
@@ -139,7 +170,18 @@ skip the picker.
 awst login                    # interactive picker
 awst login dev                # opens browser by default
 awst login dev --no-browser   # print the URL only (headless / containers)
+eval "$(awst login dev --export)"   # also export creds into the current shell
 ```
+
+With `--export`, after login the resolved credentials are printed as shell
+export statements on stdout (status text stays on stderr), so the output can be
+eval'd. This is what the `awst shell init` wrapper drives to make `awst <profile>`
+set the env (see [Shell setup](#shell-setup--awst-profile)). Use `--shell powershell`
+for PowerShell syntax.
+
+The export includes both `AWS_REGION` and `AWS_DEFAULT_REGION`. The region comes
+from `--region`/`-r`, else the profile's region, else `us-east-1`. With the shell
+wrapper installed, flags pass straight through: `awst dev -r eu-west-2`.
 
 Only the `sso_session` config form is supported:
 
@@ -190,7 +232,7 @@ Open an SSM shell session on an SSM-managed EC2 instance.
 ```sh
 awst connect i-0123abc          # by instance ID
 awst connect web-prod           # case-insensitive substring on Name tag
-awst connect                    # list available instances
+awst connect                    # pick from all instances
 awst connect -p dev -r us-east-2 web
 ```
 
@@ -198,9 +240,13 @@ Resolution:
 - If the arg starts with `i-`, it's treated as an exact instance ID.
 - Otherwise it's matched as a case-insensitive substring on the EC2
   `Name` tag.
-- If the arg matches nothing, matches multiple instances, or no arg is
-  given, the matching/full list is printed and the command exits
-  non-zero. Pipe to `fzf` / `grep` to disambiguate, or pass an `i-…` id.
+- If the arg matches nothing, the full list is printed and the command
+  exits non-zero.
+- If the arg matches multiple instances (or no arg is given), an
+  interactive picker lists the matches to choose from (arrow keys, `/` to
+  filter, `esc` to cancel). When stdin isn't a terminal (pipe / CI) the
+  matches are printed and the command exits non-zero instead — pipe to
+  `fzf` / `grep` to disambiguate, or pass an `i-…` id.
 
 Requires
 [session-manager-plugin](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html)

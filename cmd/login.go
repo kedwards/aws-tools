@@ -14,21 +14,23 @@ import (
 	"github.com/charmbracelet/x/term"
 	"github.com/spf13/cobra"
 
+	"github.com/kedwards/awst/v3/internal/creds"
 	"github.com/kedwards/awst/v3/internal/paths"
 	"github.com/kedwards/awst/v3/internal/sso"
 	"github.com/kedwards/awst/v3/internal/tui"
 )
 
 type loginDeps struct {
-	sessionLoader func(ctx context.Context, profile, configFile string) (sso.SSOSession, error)
-	oidcFactory   func(ctx context.Context, region string) (sso.OIDCClient, error)
-	cache         *sso.Cache
-	openBrowser   func(url string) error
-	sleep         func(time.Duration)
-	now           func() time.Time
-	listProfiles  func() ([]string, error)
-	selectProfile func(items []tui.ProfileItem) (string, error)
-	isTerminal    func() bool
+	sessionLoader   func(ctx context.Context, profile, configFile string) (sso.SSOSession, error)
+	oidcFactory     func(ctx context.Context, region string) (sso.OIDCClient, error)
+	cache           *sso.Cache
+	openBrowser     func(url string) error
+	sleep           func(time.Duration)
+	now             func() time.Time
+	listProfiles    func() ([]string, error)
+	selectProfile   func(items []tui.ProfileItem) (string, error)
+	isTerminal      func() bool
+	providerFactory func(ctx context.Context, profile, region string) (creds.Provider, string, error)
 }
 
 func defaultLoginDeps() loginDeps {
@@ -41,18 +43,22 @@ func defaultLoginDeps() loginDeps {
 			}
 			return ssooidc.NewFromConfig(cfg), nil
 		},
-		cache:         sso.NewCache(paths.SSOCacheDir()),
-		openBrowser:   openBrowser,
-		sleep:         time.Sleep,
-		now:           time.Now,
-		listProfiles:  defaultListProfiles,
-		selectProfile: tui.SelectProfile,
-		isTerminal:    func() bool { return term.IsTerminal(os.Stdin.Fd()) },
+		cache:           sso.NewCache(paths.SSOCacheDir()),
+		openBrowser:     openBrowser,
+		sleep:           time.Sleep,
+		now:             time.Now,
+		listProfiles:    defaultListProfiles,
+		selectProfile:   tui.SelectProfile,
+		isTerminal:      func() bool { return term.IsTerminal(os.Stdin.Fd()) },
+		providerFactory: creds.NewSDKProvider,
 	}
 }
 
 func newLoginCmd(d loginDeps) *cobra.Command {
 	var noBrowser bool
+	var export bool
+	var shellName string
+	var region string
 	c := &cobra.Command{
 		Use:   "login [profile]",
 		Short: "Log in via SSO device flow",
@@ -67,10 +73,17 @@ After a successful login, the AWS SDK default credential chain (used by
 ` + "`awst creds store`" + `) will resolve credentials for any profile that
 references the same sso_session.
 
+With --export, after login the resolved credentials are printed as shell
+export statements on stdout (status text stays on stderr), so the output can
+be eval'd to set AWS_PROFILE and the credential env vars in the current shell.
+This is what the ` + "`awst shell init`" + ` wrapper uses to make
+` + "`awst <profile>`" + ` behave like ` + "`assume <profile>`" + `.
+
 Examples:
   awst login
   awst login dev
-  awst login dev --no-browser`,
+  awst login dev --no-browser
+  eval "$(awst login dev --export)"`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
@@ -121,16 +134,48 @@ Examples:
 					"Already logged in via sso_session %q (token valid until %s).\n",
 					sess.Name, tok.ExpiresAt.Local().Format(time.RFC3339),
 				)
+			} else {
+				fmt.Fprintf(cmd.ErrOrStderr(),
+					"Logged in via sso_session %q. Token cached at %s\n",
+					sess.Name, d.cache.Path(sess.Name),
+				)
+			}
+
+			if !export {
 				return nil
 			}
-			fmt.Fprintf(cmd.ErrOrStderr(),
-				"Logged in via sso_session %q. Token cached at %s\n",
-				sess.Name, d.cache.Path(sess.Name),
-			)
+
+			// Resolve credentials and emit shell exports on stdout. Status text
+			// above went to stderr so eval "$(...)" captures only the exports.
+			shell, err := creds.ParseShell(shellName)
+			if err != nil {
+				return err
+			}
+			p, effRegion, err := d.providerFactory(ctx, profile, region)
+			if err != nil {
+				return err
+			}
+			resolved, err := creds.Resolve(ctx, profile, p)
+			if err != nil {
+				return err
+			}
+			// Prefer --region, then the profile/SDK-resolved region, and fall
+			// back to us-east-1 so a region var is always exported.
+			resolved.Region = region
+			if resolved.Region == "" {
+				resolved.Region = effRegion
+			}
+			if resolved.Region == "" {
+				resolved.Region = "us-east-1"
+			}
+			fmt.Fprint(cmd.OutOrStdout(), creds.FormatExports(profile, resolved, shell))
 			return nil
 		},
 	}
 	c.Flags().BoolVarP(&noBrowser, "no-browser", "n", false, "Print the URL only; don't try to open a browser")
+	c.Flags().BoolVarP(&export, "export", "e", false, "After login, print credential export statements on stdout for eval")
+	c.Flags().StringVar(&shellName, "shell", "posix", "Export syntax with --export: posix or powershell")
+	c.Flags().StringVarP(&region, "region", "r", "", "AWS region for exported credentials (default: profile region, else us-east-1)")
 	return c
 }
 

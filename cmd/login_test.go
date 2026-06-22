@@ -15,6 +15,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 
+	"github.com/kedwards/awst/v3/internal/creds"
 	"github.com/kedwards/awst/v3/internal/sso"
 	"github.com/kedwards/awst/v3/internal/tui"
 )
@@ -90,6 +91,13 @@ func loginTestDeps(t *testing.T, configFile string, openBrowserCalled *bool) log
 			return "", nil
 		},
 		isTerminal: func() bool { return true },
+		providerFactory: func(_ context.Context, _, _ string) (creds.Provider, string, error) {
+			return stubProvider{creds: aws.Credentials{
+				AccessKeyID:     "AKIA-TEST",
+				SecretAccessKey: "secret",
+				SessionToken:    "token",
+			}}, "us-east-1", nil
+		},
 	}
 }
 
@@ -207,6 +215,54 @@ func TestLogin_ExpiredCachedTokenRelogs(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, stderr, "example.aws/device", "expired token should trigger device flow")
 	require.True(t, browserOpened)
+}
+
+func TestLogin_ExportPrintsCredsToStdout(t *testing.T) {
+	cfg := writeAWSConfig(t, ssoSessionConfig)
+	d := loginTestDeps(t, cfg, nil)
+
+	stdout, stderr, err := runLogin(t, d, "login", "dev", "--export", "--no-browser")
+	require.NoError(t, err)
+
+	// Exports go to stdout (so eval "$(...)" captures only these)...
+	require.Contains(t, stdout, `export AWS_PROFILE="dev"`)
+	require.Contains(t, stdout, `export AWS_ACCESS_KEY_ID="AKIA-TEST"`)
+	require.Contains(t, stdout, `export AWS_SESSION_TOKEN="token"`)
+	require.Contains(t, stdout, `export AWS_REGION="us-east-1"`)
+	require.Contains(t, stdout, `export AWS_DEFAULT_REGION="us-east-1"`)
+	// ...while status text stays on stderr.
+	require.NotContains(t, stdout, "Logged in")
+	require.Contains(t, stderr, "Logged in")
+}
+
+func TestLogin_ExportRegionFlagPassedThrough(t *testing.T) {
+	cfg := writeAWSConfig(t, ssoSessionConfig)
+	d := loginTestDeps(t, cfg, nil)
+	var gotRegion string
+	d.providerFactory = func(_ context.Context, _, region string) (creds.Provider, string, error) {
+		gotRegion = region
+		return stubProvider{creds: aws.Credentials{AccessKeyID: "AKIA", SecretAccessKey: "s", SessionToken: "t"}}, region, nil
+	}
+
+	stdout, _, err := runLogin(t, d, "login", "dev", "--export", "--no-browser", "-r", "eu-west-2")
+	require.NoError(t, err)
+	require.Equal(t, "eu-west-2", gotRegion, "--region must reach the provider factory")
+	require.Contains(t, stdout, `export AWS_REGION="eu-west-2"`)
+	require.Contains(t, stdout, `export AWS_DEFAULT_REGION="eu-west-2"`)
+}
+
+func TestLogin_ExportRegionDefaultsToUsEast1(t *testing.T) {
+	cfg := writeAWSConfig(t, ssoSessionConfig)
+	d := loginTestDeps(t, cfg, nil)
+	// Neither a flag nor a resolved region — should fall back to us-east-1.
+	d.providerFactory = func(_ context.Context, _, _ string) (creds.Provider, string, error) {
+		return stubProvider{creds: aws.Credentials{AccessKeyID: "AKIA", SecretAccessKey: "s", SessionToken: "t"}}, "", nil
+	}
+
+	stdout, _, err := runLogin(t, d, "login", "dev", "--export", "--no-browser")
+	require.NoError(t, err)
+	require.Contains(t, stdout, `export AWS_REGION="us-east-1"`)
+	require.Contains(t, stdout, `export AWS_DEFAULT_REGION="us-east-1"`)
 }
 
 func TestLogin_NoBrowserFlagSuppressesOpen(t *testing.T) {

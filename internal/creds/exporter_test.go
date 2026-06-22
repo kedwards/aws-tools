@@ -79,6 +79,7 @@ func TestFormatExports_IncludesRegionWhenSet(t *testing.T) {
 		Region:          "us-east-1",
 	}, ShellPosix)
 	require.Contains(t, out, `export AWS_REGION="us-east-1"`+"\n")
+	require.Contains(t, out, `export AWS_DEFAULT_REGION="us-east-1"`+"\n")
 }
 
 func TestParseShell(t *testing.T) {
