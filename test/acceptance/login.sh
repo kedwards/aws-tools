@@ -16,7 +16,7 @@ fail() { echo "FAIL: $*" >&2; exit 1; }
 
 # 1. --help works and mentions the no-browser flag
 out=$("$BIN" login --help)
-echo "$out" | grep -q "login <profile>" || fail "help missing usage: $out"
+echo "$out" | grep -qF "login [profile]" || fail "help missing usage: $out"
 echo "$out" | grep -q -- "--no-browser" || fail "help missing --no-browser: $out"
 
 # 2. Missing profile arg exits non-zero
