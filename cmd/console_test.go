@@ -59,12 +59,12 @@ func TestConsole_OpensBrowserWithLoginURL(t *testing.T) {
 	var opened string
 	d := consoleTestDeps("signin-xyz", tempCreds(), &opened)
 
-	_, stderr, err := runConsole(t, d, "console", "dev", "-r", "us-east-1")
+	stdout, _, err := runConsole(t, d, "console", "dev", "-r", "us-east-1")
 	require.NoError(t, err)
 	require.Contains(t, opened, "Action=login")
 	require.Contains(t, opened, "SigninToken=signin-xyz")
 	require.Contains(t, opened, "console.aws.amazon.com")
-	require.Contains(t, stderr, opened, "the URL is also printed")
+	require.Empty(t, stdout, "opening a browser is quiet — nothing printed")
 }
 
 func TestConsole_ServiceFlagTargetsServiceHome(t *testing.T) {
@@ -80,10 +80,10 @@ func TestConsole_NoBrowserPrintsButDoesNotOpen(t *testing.T) {
 	var opened string
 	d := consoleTestDeps("tok", tempCreds(), &opened)
 
-	_, stderr, err := runConsole(t, d, "console", "dev", "--no-browser")
+	stdout, _, err := runConsole(t, d, "console", "dev", "--no-browser")
 	require.NoError(t, err)
 	require.Empty(t, opened, "--no-browser must not open the browser")
-	require.Contains(t, stderr, "Action=login")
+	require.Contains(t, stdout, "Action=login", "--no-browser prints the URL on stdout")
 }
 
 func TestConsole_RequiresSessionToken(t *testing.T) {
@@ -102,13 +102,12 @@ func TestConsole_ContainerFlag_OpensFirefoxContainer(t *testing.T) {
 	d := consoleTestDeps("tok", tempCreds(), &browserURL)
 	d.openContainer = func(u string) error { containerURL = u; return nil }
 
-	_, stderr, err := runConsole(t, d, "console", "dev", "-r", "us-east-1", "--container")
+	_, _, err := runConsole(t, d, "console", "dev", "-r", "us-east-1", "--container")
 	require.NoError(t, err)
 	require.True(t, strings.HasPrefix(containerURL, "ext+granted-containers:"), "got %q", containerURL)
 	require.Contains(t, containerURL, "name=dev")
 	require.Contains(t, containerURL, "Action%3Dlogin", "wraps the escaped federation URL")
 	require.Empty(t, browserURL, "container mode must not use the plain browser opener")
-	require.Contains(t, stderr, "ext+granted-containers:")
 }
 
 func TestConsole_ContainerViaEnv(t *testing.T) {
@@ -128,11 +127,11 @@ func TestConsole_ContainerNoBrowser_PrintsButDoesNotOpen(t *testing.T) {
 	d := consoleTestDeps("tok", tempCreds(), &browserURL)
 	d.openContainer = func(u string) error { containerURL = u; return nil }
 
-	_, stderr, err := runConsole(t, d, "console", "dev", "--container", "--no-browser")
+	stdout, _, err := runConsole(t, d, "console", "dev", "--container", "--no-browser")
 	require.NoError(t, err)
 	require.Empty(t, containerURL, "--no-browser must not launch Firefox")
 	require.Empty(t, browserURL)
-	require.Contains(t, stderr, "ext+granted-containers:")
+	require.Contains(t, stdout, "ext+granted-containers:", "--no-browser prints the container URL on stdout")
 }
 
 func TestConsole_AutoLoginWhenNoCachedToken(t *testing.T) {
@@ -147,14 +146,14 @@ func TestConsole_AutoLoginWhenNoCachedToken(t *testing.T) {
 	d.sleep = loginDep.sleep
 	d.now = loginDep.now
 
-	_, stderr, err := runConsole(t, d, "console", "dev", "--no-browser")
+	stdout, stderr, err := runConsole(t, d, "console", "dev", "--no-browser")
 	require.NoError(t, err)
 	// Device flow ran (prompt shown) and a token was cached for the session.
 	require.Contains(t, stderr, "example.aws/device", "auto-login should run the device flow")
 	_, statErr := os.Stat(d.cache.Path("my-sso"))
 	require.NoError(t, statErr, "auto-login should cache a token")
-	// And it still produced the console URL afterwards.
-	require.Contains(t, stderr, "Action=login")
+	// And it still produced the console URL afterwards (on stdout, --no-browser).
+	require.Contains(t, stdout, "Action=login")
 }
 
 func TestConsole_HelpFlag(t *testing.T) {

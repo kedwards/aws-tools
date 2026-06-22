@@ -129,6 +129,10 @@ Examples:
 				return err
 			}
 
+			if !export {
+				return nil // quiet success; the device prompt (if any) already printed
+			}
+
 			if cached {
 				fmt.Fprintf(cmd.ErrOrStderr(),
 					"Already logged in via sso_session %q (token valid until %s).\n",
@@ -139,10 +143,6 @@ Examples:
 					"Logged in via sso_session %q. Token cached at %s\n",
 					sess.Name, d.cache.Path(sess.Name),
 				)
-			}
-
-			if !export {
-				return nil
 			}
 
 			// Resolve credentials and emit shell exports on stdout. Status text

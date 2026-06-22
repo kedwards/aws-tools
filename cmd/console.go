@@ -158,8 +158,10 @@ Examples:
 				openURL = console.ContainerURL(name, loginURL)
 			}
 
-			fmt.Fprintf(cmd.ErrOrStderr(), "Opening the AWS console:\n  %s\n", openURL)
 			if noBrowser {
+				// Printing is the whole point here: emit the bare URL on stdout
+				// so it can be piped/copied. Otherwise stay quiet and just open.
+				fmt.Fprintln(cmd.OutOrStdout(), openURL)
 				return nil
 			}
 			if useContainer {

@@ -194,9 +194,23 @@ func TestLogin_ValidCachedTokenSkipsSSO(t *testing.T) {
 	_, stderr, err := runLogin(t, d, "login", "dev")
 
 	require.NoError(t, err)
-	require.Contains(t, stderr, "Already logged in")
 	require.NotContains(t, stderr, "example.aws/device", "device flow must not run")
 	require.False(t, browserOpened, "browser must not open when token is valid")
+}
+
+func TestLogin_NoExport_SilentOnSuccess(t *testing.T) {
+	cfg := writeAWSConfig(t, ssoSessionConfig)
+	d := loginTestDeps(t, cfg, nil)
+	require.NoError(t, d.cache.Save("my-sso", sso.Token{
+		AccessToken: "cached",
+		ExpiresAt:   d.now().Add(time.Hour),
+	}))
+
+	stdout, stderr, err := runLogin(t, d, "login", "dev")
+	require.NoError(t, err)
+	require.Empty(t, stdout, "no --export: nothing on stdout")
+	require.NotContains(t, stderr, "Logged in")
+	require.NotContains(t, stderr, "Already logged in")
 }
 
 func TestLogin_ExpiredCachedTokenRelogs(t *testing.T) {
@@ -320,10 +334,9 @@ func TestLogin_NoArg_PickerListsOnlySSOProfiles(t *testing.T) {
 		return "dev", nil
 	}
 
-	_, stderr, err := runLogin(t, d, "login")
+	_, _, err := runLogin(t, d, "login")
 	require.NoError(t, err)
 	require.ElementsMatch(t, []string{"dev", "prod"}, offered, "non-SSO 'plain' must be filtered out")
-	require.Contains(t, stderr, `sso_session "my-sso"`)
 }
 
 func TestLogin_NoArg_SingleProfileAutoSelected(t *testing.T) {
