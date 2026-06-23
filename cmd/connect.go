@@ -9,17 +9,20 @@ import (
 	"os/exec"
 	"sync"
 	"text/tabwriter"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
+	"github.com/aws/aws-sdk-go-v2/service/ssooidc"
 	"github.com/charmbracelet/x/term"
 	"github.com/spf13/cobra"
 
 	"github.com/kedwards/awst/v3/internal/connect"
 	"github.com/kedwards/awst/v3/internal/paths"
 	"github.com/kedwards/awst/v3/internal/ssmexec"
+	"github.com/kedwards/awst/v3/internal/sso"
 	"github.com/kedwards/awst/v3/internal/tui"
 )
 
@@ -39,6 +42,15 @@ type connectDeps struct {
 	connFile       string // default connections file; -f overrides at runtime
 	selectInstance func(items []tui.InstanceItem) (string, error)
 	isTerminal     func() bool
+
+	// SSO device-flow collaborators for auto-login when the cached token is
+	// missing or expired (same wiring as `login` and `console`).
+	sessionLoader func(ctx context.Context, profile, configFile string) (sso.SSOSession, error)
+	oidcFactory   func(ctx context.Context, region string) (sso.OIDCClient, error)
+	cache         *sso.Cache
+	openBrowser   func(url string) error
+	sleep         func(time.Duration)
+	now           func() time.Time
 }
 
 var awsProfileEnvMu sync.Mutex
@@ -54,6 +66,18 @@ func defaultConnectDeps() connectDeps {
 	}
 	return connectDeps{
 		connFile: connFile,
+		sessionLoader: sso.LoadSSOSession,
+		oidcFactory: func(ctx context.Context, region string) (sso.OIDCClient, error) {
+			cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(region))
+			if err != nil {
+				return nil, fmt.Errorf("load aws config: %w", err)
+			}
+			return ssooidc.NewFromConfig(cfg), nil
+		},
+		cache:       sso.NewCache(paths.SSOCacheDir()),
+		openBrowser: openBrowser,
+		sleep:       time.Sleep,
+		now:         time.Now,
 		clients: func(ctx context.Context, profile, region string) (*ssmClients, error) {
 			cfg, err := loadAWSConfig(ctx, profile, region)
 			if err != nil {
@@ -138,6 +162,30 @@ func loadAWSConfigIgnoringProfileEnv(ctx context.Context, region string) (aws.Co
 	return config.LoadDefaultConfig(ctx, awsConfigLoadOptions("", region)...)
 }
 
+// ensureLogin ensures a valid SSO token for an SSO profile, running the device
+// flow when needed. A profile without an sso_session (static/env creds) is a
+// no-op — credential resolution handles it. Prompts go to cmd's stderr.
+func (d connectDeps) ensureLogin(ctx context.Context, cmd *cobra.Command, profile string) error {
+	if d.cache == nil || d.sessionLoader == nil {
+		return nil
+	}
+	sess, err := d.sessionLoader(ctx, profile, "")
+	if err != nil {
+		return nil // not an SSO profile; let credential resolution proceed
+	}
+	prompt := func(uri, code string) {
+		fmt.Fprintf(cmd.ErrOrStderr(),
+			"Open this URL in your browser to authorize awst:\n  %s\nUser code: %s\n", uri, code)
+		if d.openBrowser != nil {
+			_ = d.openBrowser(uri)
+		}
+	}
+	_, _, err = sso.EnsureToken(ctx, d.cache, sess,
+		func() (sso.OIDCClient, error) { return d.oidcFactory(ctx, sess.Region) },
+		prompt, d.sleep, d.now)
+	return err
+}
+
 func newConnectCmd(d connectDeps) *cobra.Command {
 	var profile, region, forwardSpec, host, file string
 	c := &cobra.Command{
@@ -212,6 +260,18 @@ Examples:
 				}
 				if effRegion == "" {
 					effRegion = conn.Region
+				}
+			}
+
+			// Auto-login: if we have a profile (flag, saved connection, or
+			// AWS_PROFILE), ensure a valid SSO token first for SSO profiles.
+			loginProfile := effProfile
+			if loginProfile == "" {
+				loginProfile = os.Getenv("AWS_PROFILE")
+			}
+			if loginProfile != "" {
+				if err := d.ensureLogin(ctx, cmd, loginProfile); err != nil {
+					return err
 				}
 			}
 
