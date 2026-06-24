@@ -10,7 +10,7 @@ tasks:
   build:
     desc: Build the Go binary to dist/awst
     cmds:
-      - go build -o dist/awst ./
+      - go build -ldflags "-X github.com/kedwards/awst/v3/cmd.version=$(cat VERSION)" -o dist/awst ./
     sources:
       - "**/*.go"
       - go.mod
