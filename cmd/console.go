@@ -26,7 +26,8 @@ type consoleDeps struct {
 	providerFactory func(ctx context.Context, profile, region string) (creds.Provider, string, error)
 	signinToken     func(ctx context.Context, c console.Credentials) (string, error)
 	openBrowser     func(url string) error
-	openContainer   func(containerURL string) error
+	openFirefox     func(url string) error
+	detectContainer func() bool
 
 	// SSO device-flow collaborators for auto-login when the cached token is
 	// missing or expired (same wiring as `login`).
@@ -43,8 +44,9 @@ func defaultConsoleDeps() consoleDeps {
 		signinToken: func(ctx context.Context, c console.Credentials) (string, error) {
 			return console.SigninToken(ctx, http.DefaultClient, c)
 		},
-		openBrowser:   openBrowser,
-		openContainer: launchFirefoxContainer,
+		openBrowser:     openBrowser,
+		openFirefox:     launchFirefoxTab,
+		detectContainer: console.GrantedContainerInstalled,
 		sessionLoader: sso.LoadSSOSession,
 		oidcFactory: func(ctx context.Context, region string) (sso.OIDCClient, error) {
 			cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(region))
@@ -64,6 +66,7 @@ func newConsoleCmd(d consoleDeps) *cobra.Command {
 	var region string
 	var noBrowser bool
 	var container bool
+	var noContainer bool
 	var profileFlag string
 	c := &cobra.Command{
 		Use:   "console [profile]",
@@ -79,11 +82,13 @@ opens that account's console. Pass [profile] to federate a specific profile.
 Use --service/-s to land on a service's console home instead of the home page;
 any AWS service name works (ec2, cloudwatch, s3, lambda, …).
 
-With --container, the console opens in a per-profile Firefox container (via the
-Granted Containers extension) so multiple accounts can stay logged in at once
-without AWS's "you must log out" error. Each profile gets a stable, distinct
-color. Container mode can also be defaulted with AWST_CONSOLE_CONTAINER=1 or
-AWST_BROWSER=firefox; override the Firefox binary with AWST_FIREFOX.
+If the Granted Containers Firefox extension is detected, the console opens by
+default in a per-profile Firefox container so multiple accounts can stay logged
+in at once without AWS's "you must log out" error (each profile gets a stable,
+distinct color). If it isn't detected, a regular Firefox tab is opened instead.
+Use --container to force a container (skipping detection) or --no-container to
+force a plain tab; AWST_CONSOLE_CONTAINER=1 / AWST_BROWSER=firefox also force
+container mode. Override the Firefox binary with AWST_FIREFOX.
 
 Requires temporary (SSO/STS) credentials. Standard ` + "`aws`" + ` partition only.
 
@@ -165,7 +170,19 @@ Examples:
 
 			loginURL := console.LoginURL(tok, effective, service)
 
-			useContainer := container || containerFromEnv()
+			// Decide between a Granted container tab and a plain Firefox tab.
+			// --no-container forces plain; --container (or the env hints) forces
+			// container and skips detection; otherwise auto-detect the extension.
+			useContainer := false
+			switch {
+			case noContainer:
+				useContainer = false
+			case container || containerFromEnv():
+				useContainer = true
+			default:
+				useContainer = d.detectContainer != nil && d.detectContainer()
+			}
+
 			openURL := loginURL
 			if useContainer {
 				name := loginProfile
@@ -181,11 +198,17 @@ Examples:
 				fmt.Fprintln(cmd.OutOrStdout(), openURL)
 				return nil
 			}
-			if useContainer {
-				return d.openContainer(openURL)
-			}
-			if d.openBrowser != nil {
-				_ = d.openBrowser(loginURL)
+
+			// Both modes open Firefox; only the URL differs. In plain mode, if
+			// Firefox isn't available, fall back to the system default browser
+			// so the console still opens somewhere.
+			if err := d.openFirefox(openURL); err != nil {
+				if useContainer {
+					return err
+				}
+				if d.openBrowser != nil {
+					_ = d.openBrowser(loginURL)
+				}
 			}
 			return nil
 		},
@@ -193,7 +216,8 @@ Examples:
 	c.Flags().StringVarP(&service, "service", "s", "", "Open this service's console home (e.g. ec2, cloudwatch, s3)")
 	c.Flags().StringVarP(&region, "region", "r", "", "AWS region for the console (default: profile region, else us-east-1)")
 	c.Flags().BoolVarP(&noBrowser, "no-browser", "n", false, "Print the URL only; don't try to open a browser")
-	c.Flags().BoolVarP(&container, "container", "c", false, "Open in a per-profile Firefox container (Granted Containers extension)")
+	c.Flags().BoolVarP(&container, "container", "c", false, "Force a per-profile Firefox container, skipping extension detection")
+	c.Flags().BoolVar(&noContainer, "no-container", false, "Force a plain Firefox tab even if the Granted Containers extension is detected")
 	c.Flags().StringVarP(&profileFlag, "profile", "p", "", "AWS profile (alternative to the positional [profile])")
 	return c
 }
@@ -204,14 +228,16 @@ func containerFromEnv() bool {
 		strings.EqualFold(os.Getenv("AWST_BROWSER"), "firefox")
 }
 
-// launchFirefoxContainer opens containerURL in Firefox, which the Granted
-// Containers extension intercepts to open an isolated, named container tab.
-func launchFirefoxContainer(containerURL string) error {
+// launchFirefoxTab opens url in a new Firefox tab. For a Granted container URL
+// (ext+granted-containers:...) the Granted Containers extension intercepts it
+// and opens an isolated, named container tab; a plain federation URL opens as
+// an ordinary tab.
+func launchFirefoxTab(url string) error {
 	bin, err := firefoxPath()
 	if err != nil {
 		return err
 	}
-	return exec.Command(bin, "--new-tab", containerURL).Start()
+	return exec.Command(bin, "--new-tab", url).Start()
 }
 
 // firefoxPath locates the Firefox binary: AWST_FIREFOX override, then PATH,

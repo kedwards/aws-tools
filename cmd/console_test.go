@@ -25,12 +25,23 @@ func consoleTestDeps(token string, c aws.Credentials, opened *string) consoleDep
 		signinToken: func(_ context.Context, _ console.Credentials) (string, error) {
 			return token, nil
 		},
+		// Default open path is now a Firefox tab; capture it into the same
+		// pointer so existing default-path assertions keep working.
+		openFirefox: func(url string) error {
+			if opened != nil {
+				*opened = url
+			}
+			return nil
+		},
 		openBrowser: func(url string) error {
 			if opened != nil {
 				*opened = url
 			}
 			return nil
 		},
+		// Default: extension not detected, so the bare `console` opens a plain
+		// tab. Container tests force it on via flag/env.
+		detectContainer: func() bool { return false },
 		// Default: treat the profile as non-SSO so auto-login is skipped and
 		// these tests focus on the federation path. Auto-login has its own test.
 		sessionLoader: func(context.Context, string, string) (sso.SSOSession, error) {
@@ -117,7 +128,7 @@ func TestConsole_RequiresSessionToken(t *testing.T) {
 func TestConsole_ContainerFlag_OpensFirefoxContainer(t *testing.T) {
 	var browserURL, containerURL string
 	d := consoleTestDeps("tok", tempCreds(), &browserURL)
-	d.openContainer = func(u string) error { containerURL = u; return nil }
+	d.openFirefox = func(u string) error { containerURL = u; return nil }
 
 	_, _, err := runConsole(t, d, "console", "dev", "-r", "us-east-1", "--container")
 	require.NoError(t, err)
@@ -127,11 +138,34 @@ func TestConsole_ContainerFlag_OpensFirefoxContainer(t *testing.T) {
 	require.Empty(t, browserURL, "container mode must not use the plain browser opener")
 }
 
+func TestConsole_AutoDetect_OpensContainer(t *testing.T) {
+	var opened string
+	d := consoleTestDeps("tok", tempCreds(), &opened)
+	d.detectContainer = func() bool { return true } // extension present
+
+	_, _, err := runConsole(t, d, "console", "dev")
+	require.NoError(t, err)
+	require.True(t, strings.HasPrefix(opened, "ext+granted-containers:"),
+		"detected extension should open a container tab by default, got %q", opened)
+}
+
+func TestConsole_NoContainerFlag_ForcesPlainTab(t *testing.T) {
+	var opened string
+	d := consoleTestDeps("tok", tempCreds(), &opened)
+	d.detectContainer = func() bool { return true } // present, but...
+
+	_, _, err := runConsole(t, d, "console", "dev", "--no-container")
+	require.NoError(t, err)
+	require.Contains(t, opened, "Action=login")
+	require.False(t, strings.HasPrefix(opened, "ext+granted-containers:"),
+		"--no-container must force a plain tab, got %q", opened)
+}
+
 func TestConsole_ContainerViaEnv(t *testing.T) {
 	t.Setenv("AWST_CONSOLE_CONTAINER", "1")
 	var browserURL, containerURL string
 	d := consoleTestDeps("tok", tempCreds(), &browserURL)
-	d.openContainer = func(u string) error { containerURL = u; return nil }
+	d.openFirefox = func(u string) error { containerURL = u; return nil }
 
 	_, _, err := runConsole(t, d, "console", "dev")
 	require.NoError(t, err)
@@ -142,7 +176,7 @@ func TestConsole_ContainerViaEnv(t *testing.T) {
 func TestConsole_ContainerNoBrowser_PrintsButDoesNotOpen(t *testing.T) {
 	var browserURL, containerURL string
 	d := consoleTestDeps("tok", tempCreds(), &browserURL)
-	d.openContainer = func(u string) error { containerURL = u; return nil }
+	d.openFirefox = func(u string) error { containerURL = u; return nil }
 
 	stdout, _, err := runConsole(t, d, "console", "dev", "--container", "--no-browser")
 	require.NoError(t, err)
