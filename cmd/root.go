@@ -46,7 +46,7 @@ func init() {
 func NewRootCmd() *cobra.Command {
 	root := &cobra.Command{
 		Use:           "awst",
-		Short:         "AWS toolkit (Go port)",
+		Short:         "AWS toolkit",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		Version:       version,

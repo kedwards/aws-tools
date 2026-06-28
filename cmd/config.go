@@ -13,9 +13,7 @@ import (
 )
 
 // newConfigCmd backs `awst config`: it prints the paths and AWS settings
-// the binary actually resolves at runtime. Unlike the bash version it does
-// NOT enumerate logging/menu/cache env vars or check for aws/assume/rsync/
-// fzf — the Go port carries none of those. What it shows is the real
+// the binary actually resolves at runtime. What it shows is the real
 // surface: where creds and SSO tokens live, where `awst run` looks for
 // commands, and which AWS profile/region the SDK chain will pick up.
 func newConfigCmd() *cobra.Command {
@@ -120,7 +118,8 @@ Examples:
 func printConfig(w io.Writer) {
 	defaultCmd := paths.RunCommandsDir()
 
-	fmt.Fprintf(w, "awst %s\n\n", version)
+	fmt.Fprintf(w, "awst %s\n", version)
+	fmt.Fprintf(w, "https://github.com/kedwards/aws-tools\n\n")
 
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 
@@ -137,7 +136,7 @@ func printConfig(w io.Writer) {
 	if user, _ := regions.Load(paths.RegionsFile()); len(user) > 0 {
 		fmt.Fprintf(tw, "  Source\t%s (%d configured)\n", paths.RegionsFile(), len(user))
 	} else {
-		fmt.Fprintf(tw, "  Source\tdefaults (%d); configure with `awst config regions add`\n", len(regions.Default))
+		fmt.Fprintf(tw, "  Source\tdefaults (%d regions); configure with `awst config regions add`\n", len(regions.Default))
 	}
 	fmt.Fprintln(tw, "")
 
