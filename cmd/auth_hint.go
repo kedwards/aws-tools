@@ -1,3 +1,4 @@
+// Package cmd provides command-line interface functionality for the AWS tools.
 package cmd
 
 import (
