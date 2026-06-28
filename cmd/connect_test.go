@@ -10,6 +10,8 @@ import (
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/codebuild"
+	cbtypes "github.com/aws/aws-sdk-go-v2/service/codebuild/types"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
@@ -60,6 +62,47 @@ func (c *captureRunner) Run(args []string) error {
 func (c *captureRunner) Start(args []string, _ string) (int, error) {
 	c.gotArgs = args
 	return 4242, nil
+}
+
+type stubCodeBuild struct {
+	ids    []string
+	builds []cbtypes.Build
+}
+
+func (s *stubCodeBuild) ListBuildsForProject(_ context.Context, _ *codebuild.ListBuildsForProjectInput, _ ...func(*codebuild.Options)) (*codebuild.ListBuildsForProjectOutput, error) {
+	return &codebuild.ListBuildsForProjectOutput{Ids: s.ids}, nil
+}
+func (s *stubCodeBuild) BatchGetBuilds(_ context.Context, _ *codebuild.BatchGetBuildsInput, _ ...func(*codebuild.Options)) (*codebuild.BatchGetBuildsOutput, error) {
+	return &codebuild.BatchGetBuildsOutput{Builds: s.builds}, nil
+}
+
+func cbDebugBuild(id, target string) cbtypes.Build {
+	return cbtypes.Build{
+		Id:           aws.String(id),
+		BuildStatus:  cbtypes.StatusTypeInProgress,
+		CurrentPhase: aws.String("BUILD"),
+		DebugSession: &cbtypes.DebugSession{SessionEnabled: aws.Bool(true), SessionTarget: aws.String(target)},
+	}
+}
+
+// codebuildTestDeps wires a CodeBuild stub (and an injectable build picker)
+// into connectDeps without disturbing the instance-focused connectTestDeps.
+func codebuildTestDeps(ssm *stubSSM, cb connect.CodeBuildClient) connectDeps {
+	return connectDeps{
+		clients: func(ctx context.Context, profile, region string) (*ssmClients, error) {
+			return &ssmClients{
+				SSM:        ssm,
+				EC2:        &stubEC2{},
+				SSMSession: ssm,
+				CodeBuild:  cb,
+				Region:     "us-east-1",
+				Profile:    profile,
+			}, nil
+		},
+		runner:     &captureRunner{},
+		lookPlugin: func() error { return nil },
+		isTerminal: func() bool { return false },
+	}
 }
 
 func ssmInfo(id string) ssmtypes.InstanceInformation {
@@ -344,6 +387,73 @@ func TestConnect_InvalidForwardSpec_ErrorsBeforeAWS(t *testing.T) {
 	_, _, err := runConnect(t, d, "connect", "web", "--forward", "not-a-port")
 	require.Error(t, err)
 	require.Nil(t, ssmStub.startCall, "must fail before any StartSession call")
+}
+
+func TestConnect_CodeBuild_SingleDebugBuild_StartsSession(t *testing.T) {
+	ssmStub := &stubSSM{startOut: startOut()}
+	cb := &stubCodeBuild{ids: []string{"p:1"}, builds: []cbtypes.Build{cbDebugBuild("p:1", "sandbox-target")}}
+	d := codebuildTestDeps(ssmStub, cb)
+
+	_, _, err := runConnect(t, d, "connect", "--project-name", "p")
+	require.NoError(t, err)
+	require.NotNil(t, ssmStub.startCall, "a session should be started")
+	require.Equal(t, "sandbox-target", aws.ToString(ssmStub.startCall.Target), "connects to the build's debug session target")
+}
+
+func TestConnect_CodeBuild_NoDebugBuilds_Errors(t *testing.T) {
+	ssmStub := &stubSSM{}
+	cb := &stubCodeBuild{
+		ids:    []string{"p:1"},
+		builds: []cbtypes.Build{{Id: aws.String("p:1"), BuildStatus: cbtypes.StatusTypeSucceeded}}, // no debug session
+	}
+	d := codebuildTestDeps(ssmStub, cb)
+
+	_, _, err := runConnect(t, d, "connect", "--project-name", "p")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "no builds with a debug session")
+	require.Nil(t, ssmStub.startCall)
+}
+
+func TestConnect_CodeBuild_MultiBuild_Terminal_PicksAndConnects(t *testing.T) {
+	ssmStub := &stubSSM{startOut: startOut()}
+	cb := &stubCodeBuild{
+		ids:    []string{"p:1", "p:2"},
+		builds: []cbtypes.Build{cbDebugBuild("p:1", "target-1"), cbDebugBuild("p:2", "target-2")},
+	}
+	d := codebuildTestDeps(ssmStub, cb)
+	d.isTerminal = func() bool { return true }
+	d.selectBuild = func(items []tui.BuildItem) (string, error) { return "p:2", nil }
+
+	// profile+region given so only the build picker is exercised here.
+	_, _, err := runConnect(t, d, "connect", "--project-name", "p", "--profile", "x", "--region", "us-east-1")
+	require.NoError(t, err)
+	require.Equal(t, "target-2", aws.ToString(ssmStub.startCall.Target), "connects to the chosen build's target")
+}
+
+func TestConnect_CodeBuild_MultiBuild_NonInteractive_Errors(t *testing.T) {
+	ssmStub := &stubSSM{}
+	cb := &stubCodeBuild{
+		ids:    []string{"p:1", "p:2"},
+		builds: []cbtypes.Build{cbDebugBuild("p:1", "target-1"), cbDebugBuild("p:2", "target-2")},
+	}
+	d := codebuildTestDeps(ssmStub, cb) // isTerminal false
+
+	out, _, err := runConnect(t, d, "connect", "--project-name", "p")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "ambiguous")
+	require.Contains(t, out, "p:1", "lists the candidate builds")
+	require.Nil(t, ssmStub.startCall)
+}
+
+func TestConnect_CodeBuild_ConflictsWithForward(t *testing.T) {
+	ssmStub := &stubSSM{}
+	cb := &stubCodeBuild{}
+	d := codebuildTestDeps(ssmStub, cb)
+
+	_, _, err := runConnect(t, d, "connect", "--project-name", "p", "--forward", "5432")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "CodeBuild debug session")
+	require.Nil(t, ssmStub.startCall, "must fail before any AWS call")
 }
 
 func TestConnect_SavedConnection(t *testing.T) {

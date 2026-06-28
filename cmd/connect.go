@@ -16,6 +16,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/codebuild"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
 	"github.com/aws/aws-sdk-go-v2/service/ssooidc"
@@ -33,6 +34,7 @@ type ssmClients struct {
 	SSM        connect.SSMClient
 	EC2        connect.EC2Client
 	SSMSession connect.SSMSessionClient
+	CodeBuild  connect.CodeBuildClient
 	Cmd        ssmexec.CmdClient
 	Region     string
 	Profile    string
@@ -44,6 +46,7 @@ type connectDeps struct {
 	lookPlugin     func() error
 	connFile       string // default connections file; -f overrides at runtime
 	selectInstance func(items []tui.InstanceItem) (string, error)
+	selectBuild    func(items []tui.BuildItem) (string, error)
 	isTerminal     func() bool
 
 	// SSO device-flow collaborators for auto-login when the cached token is
@@ -91,6 +94,7 @@ func defaultConnectDeps() connectDeps {
 				SSM:        ssmClient,
 				EC2:        ec2.NewFromConfig(cfg),
 				SSMSession: ssmClient,
+				CodeBuild:  codebuild.NewFromConfig(cfg),
 				Cmd:        ssmClient,
 				Region:     cfg.Region,
 				Profile:    profile,
@@ -102,6 +106,7 @@ func defaultConnectDeps() connectDeps {
 			return err
 		},
 		selectInstance: tui.SelectInstance,
+		selectBuild:    tui.SelectBuild,
 		isTerminal:     func() bool { return term.IsTerminal(os.Stdin.Fd()) },
 	}
 }
@@ -191,6 +196,7 @@ func (d connectDeps) ensureLogin(ctx context.Context, cmd *cobra.Command, profil
 
 func newConnectCmd(d connectDeps) *cobra.Command {
 	var profile, region, forwardSpec, host, file string
+	var projectName, buildID string
 	var foreground bool
 	c := &cobra.Command{
 		Use:   "connect [instance|connection]",
@@ -212,6 +218,10 @@ Saved connection: if the argument matches a [section] in the connections
 file (default ~/.config/aws-tools/connections.config, override with -f or
 AWST_CONN_FILE) a port-forward starts using that section's settings.
 
+CodeBuild debug (--project-name): open a shell on a running build that has
+a debug session enabled. Auto-selects a lone debug build, otherwise prompts;
+pass --build-id to connect to a specific build directly.
+
 Requires session-manager-plugin on PATH (override with AWST_SSM_PLUGIN).
 
 Examples:
@@ -220,6 +230,7 @@ Examples:
   awst connect web-prod --forward 5432:5432
   awst connect web --forward 8428,9093 --host mon.internal
   awst connect Engine            # named saved connection
+  awst connect --project-name my-build   # CodeBuild debug session
   awst connect                   # lists available instances`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -233,6 +244,15 @@ Examples:
 			arg := ""
 			if len(args) == 1 {
 				arg = args[0]
+			}
+
+			// --project-name connects to a CodeBuild debug session — a shell
+			// against the build container, not an instance or a tunnel.
+			if projectName != "" && (forwardSpec != "" || arg != "") {
+				return errors.New("--project-name connects to a CodeBuild debug session; it takes neither an instance argument nor --forward")
+			}
+			if buildID != "" && projectName == "" {
+				return errors.New("--build-id requires --project-name")
 			}
 
 			// Validate the ad-hoc spec up front, before any AWS calls.
@@ -297,6 +317,10 @@ Examples:
 			clients, err := d.clients(ctx, effProfile, effRegion)
 			if err != nil {
 				return err
+			}
+
+			if projectName != "" {
+				return authHint(d.runCodeBuild(ctx, cmd, clients, projectName, buildID), clients.Profile)
 			}
 
 			list, err := connect.List(ctx, clients.SSM, clients.EC2)
@@ -366,7 +390,72 @@ Examples:
 	c.Flags().StringVarP(&host, "host", "H", "", "Remote host reachable from the instance (e.g. an RDS endpoint)")
 	c.Flags().StringVarP(&file, "file", "f", "", "Connections file (default ~/.config/aws-tools/connections.config)")
 	c.Flags().BoolVarP(&foreground, "foreground", "F", false, "Run a port-forward in the foreground (block until Ctrl+C) instead of detaching")
+	c.Flags().StringVar(&projectName, "project-name", "", "Connect to a debug session of this CodeBuild project")
+	c.Flags().StringVar(&buildID, "build-id", "", "CodeBuild build ID to connect to (skips the picker; requires --project-name)")
 	return c
+}
+
+// runCodeBuild resolves a CodeBuild build with a debug session and opens an SSM
+// shell against its session target. With buildID set it connects directly;
+// otherwise it auto-selects a lone debug build or prompts to pick one.
+func (d connectDeps) runCodeBuild(ctx context.Context, cmd *cobra.Command, clients *ssmClients, project, buildID string) error {
+	builds, err := connect.ListDebugBuilds(ctx, clients.CodeBuild, project, buildID)
+	if err != nil {
+		return authHint(err, clients.Profile)
+	}
+
+	var build connect.DebugBuild
+	switch {
+	case len(builds) == 0:
+		return fmt.Errorf("no builds with a debug session for project %q", project)
+	case len(builds) == 1:
+		build = builds[0]
+	default: // 2+ debug builds — pick interactively, or error in a pipe/CI
+		if !d.isTerminal() {
+			printDebugBuilds(cmd.OutOrStdout(), builds)
+			return fmt.Errorf("ambiguous: %d builds with a debug session for %q (pass --build-id, or run interactively)", len(builds), project)
+		}
+		id, err := d.selectBuild(toBuildItems(builds))
+		if err != nil {
+			if errors.Is(err, tui.ErrAborted) {
+				return nil // user quit the picker; nothing to do
+			}
+			return err
+		}
+		build = buildByID(builds, id)
+	}
+
+	fmt.Fprintf(cmd.ErrOrStderr(), "Connecting to CodeBuild build %s in %s (%s)...\n", build.ID, clients.Profile, clients.Region)
+	return authHint(connect.StartSession(ctx, clients.SSMSession, d.runner,
+		build.Target, clients.Region, clients.Profile, connect.SSMEndpoint(clients.Region)), clients.Profile)
+}
+
+func toBuildItems(builds []connect.DebugBuild) []tui.BuildItem {
+	items := make([]tui.BuildItem, len(builds))
+	for i, b := range builds {
+		items[i] = tui.BuildItem{ID: b.ID, Status: b.Status, Phase: b.Phase}
+	}
+	return items
+}
+
+// buildByID returns the build with the given ID, or a zero DebugBuild if absent
+// (it always is present — the id came from the same slice).
+func buildByID(builds []connect.DebugBuild, id string) connect.DebugBuild {
+	for _, b := range builds {
+		if b.ID == id {
+			return b
+		}
+	}
+	return connect.DebugBuild{}
+}
+
+func printDebugBuilds(w io.Writer, builds []connect.DebugBuild) {
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, "BUILD\tSTATUS\tPHASE")
+	for _, b := range builds {
+		fmt.Fprintf(tw, "%s\t%s\t%s\n", b.ID, b.Status, b.Phase)
+	}
+	tw.Flush()
 }
 
 // lookupConnection returns the named connection from path. A missing file
