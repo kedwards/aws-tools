@@ -40,6 +40,16 @@ tasks:
       - test
       - acceptance
 
+  ext:build:
+    desc: Build (and lint) the awst Containers Firefox extension into ./dist
+    cmds:
+      - npx --yes web-ext build --source-dir=extension --artifacts-dir=dist --overwrite-dest
+
+  ext:sign:
+    desc: Sign the extension as an unlisted XPI (needs WEB_EXT_API_KEY / WEB_EXT_API_SECRET)
+    cmds:
+      - npx --yes web-ext sign --source-dir=extension --channel=unlisted --artifacts-dir=dist
+
   version:
     desc: Show current version
     cmds:
