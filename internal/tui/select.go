@@ -215,6 +215,63 @@ func (d instanceDelegate) Render(w io.Writer, m list.Model, index int, item list
 	fmt.Fprint(w, "  "+name+meta)
 }
 
+// BuildItem is one selectable CodeBuild build with a debug session.
+type BuildItem struct {
+	ID     string
+	Status string
+	Phase  string
+}
+
+func (i BuildItem) FilterValue() string { return i.ID }
+func (i BuildItem) choiceValue() string { return i.ID }
+
+// buildDelegate renders a build on a single line with a ">" cursor: the build
+// id, then dimmed status · phase.
+type buildDelegate struct{ idW, statusW int }
+
+func (buildDelegate) Height() int                             { return 1 }
+func (buildDelegate) Spacing() int                            { return 0 }
+func (buildDelegate) Update(_ tea.Msg, _ *list.Model) tea.Cmd { return nil }
+func (d buildDelegate) Render(w io.Writer, m list.Model, index int, item list.Item) {
+	it, ok := item.(BuildItem)
+	if !ok {
+		return
+	}
+	id := fmt.Sprintf("%-*s", d.idW, it.ID) // pad to column width before styling
+	meta := "  " + dimStyle.Render(fmt.Sprintf("%-*s · %s", d.statusW, it.Status, it.Phase))
+	if index == m.Index() {
+		fmt.Fprint(w, "> "+selectedStyle.Render(id)+meta)
+		return
+	}
+	fmt.Fprint(w, "  "+id+meta)
+}
+
+// SelectBuild shows an arrow-key list of CodeBuild builds and returns the
+// chosen build ID. It returns ErrAborted if the user quits without selecting.
+func SelectBuild(items []BuildItem) (string, error) {
+	rows := make([]list.Item, len(items))
+	var idW, statusW int
+	for i, it := range items {
+		rows[i] = it
+		idW = max(idW, len(it.ID))
+		statusW = max(statusW, len(it.Status))
+	}
+	l := list.New(rows, buildDelegate{idW: idW, statusW: statusW}, 0, 0)
+	l.Title = "Select a CodeBuild debug session to connect to"
+	l.SetShowStatusBar(false)
+	l.Styles.Title = titleStyle
+
+	res, err := tea.NewProgram(model{list: l}).Run()
+	if err != nil {
+		return "", err
+	}
+	fm := res.(model)
+	if fm.aborted || fm.choice == "" {
+		return "", ErrAborted
+	}
+	return fm.choice, nil
+}
+
 // SelectInstance shows an arrow-key list of instances and returns the chosen
 // instance ID. It returns ErrAborted if the user quits without selecting.
 func SelectInstance(items []InstanceItem) (string, error) {
