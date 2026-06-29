@@ -46,7 +46,18 @@ WEB_EXT_API_KEY=…  WEB_EXT_API_SECRET=…  \
   npx --yes web-ext sign --source-dir=extension --channel=unlisted --artifacts-dir=dist
 ```
 
-`web-ext sign` produces `dist/awst_containers-<version>.xpi`. Publish it as a
-GitHub release asset; users install via `awst console --install-extension`
-(point `AWST_EXTENSION_XPI` at the downloaded file) or by opening the XPI in
-Firefox.
+`task ext:sign` signs into `dist/`, then copies the result to the stable path
+**`extension/awst-containers.xpi`** (web-ext's own filename is
+`<amo-slug>-<version>.xpi`). That committed artifact is what releases ship:
+`goreleaser` attaches `extension/awst-containers.xpi` to each tag (see
+`release.extra_files` in `.goreleaser.yml`) — no AMO signing runs in CI.
+
+So the release workflow is:
+
+1. Change the extension → bump `version` in `manifest.json`.
+2. `op run … -- task ext:sign` (or set `WEB_EXT_API_KEY`/`WEB_EXT_API_SECRET`).
+3. Commit the updated `extension/awst-containers.xpi`.
+4. Tag/release as usual — the XPI rides along as `awst-containers.xpi`.
+
+Users install via `awst console --install-extension` (point
+`AWST_EXTENSION_XPI` at the downloaded file) or by opening the XPI in Firefox.
