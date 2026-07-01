@@ -13,7 +13,7 @@ import (
 	"github.com/kedwards/awst/v3/internal/sso"
 )
 
-func runLogout(t *testing.T, d logoutDeps, args ...string) (stderr string, err error) {
+func runLogout(t *testing.T, d logoutDeps, args ...string) (stdout, stderr string, err error) {
 	t.Helper()
 	root := &cobra.Command{Use: "awst", SilenceUsage: true, SilenceErrors: true}
 	root.AddCommand(newLogoutCmd(d))
@@ -22,7 +22,7 @@ func runLogout(t *testing.T, d logoutDeps, args ...string) (stderr string, err e
 	root.SetErr(&errBuf)
 	root.SetArgs(args)
 	err = root.Execute()
-	return errBuf.String(), err
+	return out.String(), errBuf.String(), err
 }
 
 func TestLogout_Profile_ClearsThatSession(t *testing.T) {
@@ -37,7 +37,7 @@ func TestLogout_Profile_ClearsThatSession(t *testing.T) {
 		cache: cache,
 	}
 
-	stderr, err := runLogout(t, d, "logout", "dev")
+	_, stderr, err := runLogout(t, d, "logout", "dev")
 	require.NoError(t, err)
 	require.Contains(t, stderr, "my-sso")
 	_, statErr := os.Stat(cache.Path("my-sso"))
@@ -56,7 +56,7 @@ func TestLogout_ProfileFlag_ClearsThatSession(t *testing.T) {
 		cache: cache,
 	}
 
-	stderr, err := runLogout(t, d, "logout", "--profile", "dev")
+	_, stderr, err := runLogout(t, d, "logout", "--profile", "dev")
 	require.NoError(t, err)
 	require.Contains(t, stderr, "my-sso")
 	_, statErr := os.Stat(cache.Path("my-sso"))
@@ -65,7 +65,7 @@ func TestLogout_ProfileFlag_ClearsThatSession(t *testing.T) {
 
 func TestLogout_ProfileFlagAndPositionalConflict(t *testing.T) {
 	d := logoutDeps{cache: sso.NewCache(t.TempDir())}
-	_, err := runLogout(t, d, "logout", "dev", "--profile", "dev")
+	_, _, err := runLogout(t, d, "logout", "dev", "--profile", "dev")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "not both")
 }
@@ -76,7 +76,7 @@ func TestLogout_NoArg_ClearsAll(t *testing.T) {
 	require.NoError(t, cache.Save("s2", sso.Token{AccessToken: "b", ExpiresAt: time.Now().Add(time.Hour)}))
 
 	d := logoutDeps{cache: cache}
-	stderr, err := runLogout(t, d, "logout")
+	_, stderr, err := runLogout(t, d, "logout")
 	require.NoError(t, err)
 	require.Contains(t, stderr, "Cleared 2")
 	_, e1 := os.Stat(cache.Path("s1"))
@@ -86,7 +86,35 @@ func TestLogout_NoArg_ClearsAll(t *testing.T) {
 
 func TestLogout_NoArg_EmptyCacheIsClean(t *testing.T) {
 	d := logoutDeps{cache: sso.NewCache(t.TempDir())}
-	stderr, err := runLogout(t, d, "logout")
+	_, stderr, err := runLogout(t, d, "logout")
 	require.NoError(t, err)
 	require.Contains(t, stderr, "Cleared 0")
+}
+
+func TestLogout_Export_PrintsUnsetToStdout(t *testing.T) {
+	d := logoutDeps{cache: sso.NewCache(t.TempDir())}
+	stdout, stderr, err := runLogout(t, d, "logout", "--export")
+	require.NoError(t, err)
+	// Unset statements go to stdout (so eval "$(...)" clears the shell)...
+	require.Contains(t, stdout, "unset ")
+	require.Contains(t, stdout, "AWS_PROFILE")
+	require.Contains(t, stdout, "AWS_ACCESS_KEY_ID")
+	require.Contains(t, stdout, "AWS_REGION")
+	// ...while the cache-clear status stays on stderr.
+	require.Contains(t, stderr, "Cleared")
+	require.NotContains(t, stdout, "Cleared")
+}
+
+func TestLogout_Export_PowerShell(t *testing.T) {
+	d := logoutDeps{cache: sso.NewCache(t.TempDir())}
+	stdout, _, err := runLogout(t, d, "logout", "--export", "--shell", "powershell")
+	require.NoError(t, err)
+	require.Contains(t, stdout, "Remove-Item Env:AWS_PROFILE")
+}
+
+func TestLogout_NoExport_SilentStdout(t *testing.T) {
+	d := logoutDeps{cache: sso.NewCache(t.TempDir())}
+	stdout, _, err := runLogout(t, d, "logout")
+	require.NoError(t, err)
+	require.Empty(t, stdout, "no --export: nothing on stdout to eval")
 }
